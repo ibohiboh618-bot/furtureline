@@ -6,6 +6,7 @@
 // never need to read group chatter, so the default privacy-mode-on
 // behavior (bot only sees explicit commands) is exactly right here.
 
+require('dotenv').config();
 const { Pool } = require('pg');
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -95,11 +96,10 @@ async function deactivateBroadcastTarget(chatId) {
 
 async function isUserChatAdmin(ctx) {
   try {
-    const member = await ctx.getAuthor(); // grammy helper, falls back below if unavailable
-    return ['administrator', 'creator'].includes(member.status);
-  } catch {
     const member = await ctx.api.getChatMember(ctx.chat.id, ctx.from.id);
     return ['administrator', 'creator'].includes(member.status);
+  } catch {
+    return false;
   }
 }
 

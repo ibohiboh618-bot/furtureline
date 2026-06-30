@@ -5,6 +5,7 @@
 // (separate from the bot) so a bot restart never drops live data, and a
 // data hiccup never takes down the bot.
 
+require('dotenv').config();
 const { Pool } = require('pg');
 const { connectStream } = require('../txodds/sse-client');
 const { normalizeOddsPayload } = require('../txodds/normalize');

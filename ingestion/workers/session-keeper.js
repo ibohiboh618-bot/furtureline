@@ -11,6 +11,7 @@
 // for 4 weeks regardless of process restarts; only the JWT needs frequent
 // refreshing.
 
+require('dotenv').config();
 const { Pool } = require('pg');
 const { getGuestJwt, runFullActivation } = require('../txodds/auth');
 

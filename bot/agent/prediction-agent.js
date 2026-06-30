@@ -11,6 +11,7 @@
 // submission" rule and for not quietly drifting into something that looks
 // like automated betting.
 
+require('dotenv').config();
 const Groq = require('groq-sdk');
 const { Pool } = require('pg');
 

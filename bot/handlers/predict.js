@@ -5,6 +5,7 @@
 // points. The agent never writes to predictions or points_ledger itself;
 // only this confirm handler does, and only after an explicit tap.
 
+require('dotenv').config();
 const { Pool } = require('pg');
 const { InlineKeyboard } = require('grammy');
 const { suggestPicks } = require('../agent/prediction-agent');

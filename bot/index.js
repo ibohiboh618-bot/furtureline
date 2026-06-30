@@ -4,6 +4,7 @@
 // ingestion workers (odds-listener, score-listener) -- see /README.md for
 // the full process layout and why they're split.
 
+require('dotenv').config();
 const { Bot } = require('grammy');
 
 const { registerPredictHandlers } = require('./handlers/predict');

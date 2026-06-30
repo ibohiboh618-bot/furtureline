@@ -7,6 +7,7 @@
 // process polls/queues from there (see bot/broadcast-queue.js), which
 // keeps the rate-limit logic in one place instead of duplicated here.
 
+require('dotenv').config();
 const { Pool } = require('pg');
 const { connectStream } = require('../txodds/sse-client');
 const { normalizeScoreEvent } = require('../txodds/normalize');

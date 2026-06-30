@@ -7,7 +7,7 @@
     "bot": "node bot/index.js",
     "ingest:odds": "node ingestion/workers/odds-listener.js",
     "ingest:scores": "node ingestion/workers/score-listener.js",
-    "db:migrate": "psql \"$DATABASE_URL\" -f db/schema.sql",
+    "db:migrate": "node scripts/apply-schema.js",
     "db:bootstrap": "node scripts/bootstrap-session.js"
   },
   "dependencies": {
@@ -15,6 +15,7 @@
     "@solana/spl-token": "^0.4.9",
     "@solana/web3.js": "^1.95.3",
     "axios": "^1.7.7",
+    "dotenv": "^16.4.5",
     "eventsource": "^3.0.2",
     "grammy": "^1.30.0",
     "groq-sdk": "^0.7.0",
@@ -22,3 +23,4 @@
     "tweetnacl": "^1.0.3"
   }
 }
+

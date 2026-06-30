@@ -129,7 +129,7 @@ async function main() {
   console.log('[bootstrap] Executing bootstrapSession()...');
   const session = await bootstrapSession({ walletKeypair, program });
   console.log('[bootstrap] Session bootstrapped successfully in database!');
-  console.log('[bootstrap] JWT expiration:', session.jwtExpiresAt);
+  console.log('[bootstrap] API Token acquired:', session.apiToken ? 'yes' : 'no');
 }
 
 main()

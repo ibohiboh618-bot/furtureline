@@ -10,6 +10,7 @@
 // limiter rather than trying to track per-chat limits separately -- with
 // a few hundred broadcast targets this is simpler and safe by construction.
 
+require('dotenv').config();
 const { Pool } = require('pg');
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });

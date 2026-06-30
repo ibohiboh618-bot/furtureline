@@ -7,6 +7,7 @@
 // honest way to tie the prediction/markets and fan-experience ideas
 // together without building an actual betting exchange.
 
+require('dotenv').config();
 const { Pool } = require('pg');
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
