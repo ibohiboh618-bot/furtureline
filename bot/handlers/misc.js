@@ -10,7 +10,7 @@ const axios = require('axios');
 const { buildMainMenu } = require('../ui');
 const { formatInsightsText } = require('../market-insights');
 const { handlePredictCommand, handleMyPicks } = require('./predict');
-const { verifyFixtureProof } = require('../ingestion/txodds/verify');
+const { verifyFixtureProof } = require('../../ingestion/txodds/verify');
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const TXLINE_BASE_URL = process.env.TXLINE_BASE_URL || 'https://txline.txodds.com';
