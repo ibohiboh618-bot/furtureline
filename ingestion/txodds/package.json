@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "start": "node verify-service.js",
-    "verify-service": "node verify-service.js"
+    "verify-service": "node verify-service.js",
+    "start:verify-service": "node verify-service.js",
+    "start:verify-worker": "node worker.js"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.30.1",

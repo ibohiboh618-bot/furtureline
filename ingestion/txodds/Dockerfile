@@ -11,4 +11,4 @@ COPY . ./
 
 ENV NODE_ENV=production
 EXPOSE 3001
-CMD ["npm", "run", "start"]
+CMD ["sh", "-c", "[ \"$RUN_MODE\" = \"worker\" ] && npm run start:verify-worker || npm run start:verify-service"]

@@ -4,6 +4,6 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "npm run verify-service"
+    "startCommand": "npm run start:verify-service"
   }
 }
