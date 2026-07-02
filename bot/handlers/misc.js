@@ -110,15 +110,37 @@ async function handleVerify(ctx) {
     const { jwt, apiToken } = await getActiveSession();
     const proofResponse = await fetchMerkleProof(fixtureIdStr, jwt, apiToken);
 
-    // Avoid importing Anchor and related heavy ESM dependencies inside the
-    // bot process (causes ERR_REQUIRE_ESM on some deploy targets). We show
-    // the proof details here and leave on-chain validation to a separate
-    // worker/process. See README or run the verify worker manually.
+    const verifyServiceUrl = process.env.VERIFY_SERVICE_URL;
+    if (verifyServiceUrl) {
+      try {
+        const url = verifyServiceUrl.replace(/\/$/, '') + '/verify';
+        const resp = await axios.post(url, proofResponse.proofPayload, { timeout: 20000 });
+        const txSig = resp.data?.txSig || resp.data?.tx_sig || resp.data?.sig;
+        if (txSig) {
+          const rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
+          const explorerUrl = rpcUrl.includes('devnet')
+            ? `https://explorer.solana.com/tx/${txSig}?cluster=devnet`
+            : `https://explorer.solana.com/tx/${txSig}`;
+
+          return await ctx.reply(
+            `On-chain validation submitted.\n` +
+            `Validation transaction: <code>${txSig}</code>\n` +
+            `View on explorer: ${explorerUrl}`,
+            { parse_mode: 'HTML', reply_markup: buildMainMenu() }
+          );
+        }
+      } catch (e) {
+        console.error('[verify] verify-service call failed:', e?.message || e);
+        // fall through to show proof details and instructions
+      }
+    }
+
+    // Fallback: show proof details and instruct operator to run verification
     await ctx.reply(
       `This fixture's data batch is anchored on Solana.\n` +
       `Merkle root: <code>${proofResponse.merkleRoot}</code>\n` +
       `Batch timestamp: ${proofResponse.batchTimestamp}\n\n` +
-      `To perform on-chain validation, run the verification worker (ingestion/txodds/verify) on a machine that can load Anchor.`,
+      `To perform on-chain validation, either run the verification worker locally or deploy the verify service and set VERIFY_SERVICE_URL in the bot process.`,
       { parse_mode: 'HTML', reply_markup: buildMainMenu() }
     );
   } catch (err) {

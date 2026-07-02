@@ -9,7 +9,8 @@
     "ingest:odds": "node ingestion/workers/odds-listener.js",
     "ingest:scores": "node ingestion/workers/score-listener.js",
     "db:migrate": "node scripts/apply-schema.js",
-    "db:bootstrap": "node scripts/bootstrap-session.js"
+    "db:bootstrap": "node scripts/bootstrap-session.js",
+    "verify-service": "node ingestion/txodds/verify-service.js"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.30.1",
