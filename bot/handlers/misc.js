@@ -10,7 +10,6 @@ const axios = require('axios');
 const { buildMainMenu } = require('../ui');
 const { formatInsightsText } = require('../market-insights');
 const { handlePredictCommand, handleMyPicks } = require('./predict');
-const { verifyFixtureProof } = require('../../ingestion/txodds/verify');
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const TXLINE_BASE_URL = process.env.TXLINE_BASE_URL || 'https://txline.txodds.com';
@@ -110,18 +109,16 @@ async function handleVerify(ctx) {
   try {
     const { jwt, apiToken } = await getActiveSession();
     const proofResponse = await fetchMerkleProof(fixtureIdStr, jwt, apiToken);
-    const txSig = await verifyFixtureProof(proofResponse.proofPayload);
-    const rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
-    const explorerUrl = rpcUrl.includes('devnet')
-      ? `https://explorer.solana.com/tx/${txSig}?cluster=devnet`
-      : `https://explorer.solana.com/tx/${txSig}`;
 
+    // Avoid importing Anchor and related heavy ESM dependencies inside the
+    // bot process (causes ERR_REQUIRE_ESM on some deploy targets). We show
+    // the proof details here and leave on-chain validation to a separate
+    // worker/process. See README or run the verify worker manually.
     await ctx.reply(
       `This fixture's data batch is anchored on Solana.\n` +
       `Merkle root: <code>${proofResponse.merkleRoot}</code>\n` +
       `Batch timestamp: ${proofResponse.batchTimestamp}\n\n` +
-      `Validation transaction: <code>${txSig}</code>\n` +
-      `View on explorer: ${explorerUrl}`,
+      `To perform on-chain validation, run the verification worker (ingestion/txodds/verify) on a machine that can load Anchor.`,
       { parse_mode: 'HTML', reply_markup: buildMainMenu() }
     );
   } catch (err) {
