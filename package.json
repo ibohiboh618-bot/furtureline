@@ -4,6 +4,7 @@
   "description": "Telegram fan bot for the TxODDS World Cup hackathon: live updates, AI-suggested predictions, and on-chain verified results.",
   "private": true,
   "scripts": {
+    "start": "npm run bot",
     "bot": "node bot/index.js",
     "ingest:odds": "node ingestion/workers/odds-listener.js",
     "ingest:scores": "node ingestion/workers/score-listener.js",
