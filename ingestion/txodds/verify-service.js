@@ -7,16 +7,33 @@ require('dotenv').config();
 const http = require('http');
 const axios = require('axios');
 const { Pool } = require('pg');
+const Redis = require('ioredis');
 
 const { verifyFixtureProof } = require('./verify');
 const crypto = require('crypto');
 
-// Simple in-memory rate limiter: allows N requests per window per IP
+// Simple in-memory rate limiter settings; can be backed by Redis
 const RATE_LIMIT_WINDOW_MS = Number(process.env.VERIFY_RATE_WINDOW_MS || 60_000);
 const RATE_LIMIT_MAX = Number(process.env.VERIFY_RATE_MAX || 20);
 const ipCounters = new Map();
 
-function isRateLimited(ip) {
+let redisClient = null;
+if (process.env.REDIS_URL) {
+  redisClient = new Redis(process.env.REDIS_URL);
+}
+
+// Rate limiter: prefer Redis when configured
+async function isRateLimited(ip) {
+  if (redisClient) {
+    const key = `verify:rate:${ip}`;
+    const tx = redisClient.multi();
+    tx.incr(key);
+    tx.pexpire(key, RATE_LIMIT_WINDOW_MS);
+    const results = await tx.exec();
+    const count = Number(results?.[0]?.[1] || 0);
+    return count > RATE_LIMIT_MAX;
+  }
+
   const now = Date.now();
   let entry = ipCounters.get(ip);
   if (!entry) {
@@ -78,6 +95,35 @@ const server = http.createServer((req, res) => {
     return jsonResponse(res, 200, { ok: true });
   }
 
+  // Admin rotate token: POST /rotate-token (Authorization: Bearer <ADMIN_TOKEN>)
+  if (req.method === 'POST' && req.url === '/rotate-token') {
+    const adminToken = process.env.ADMIN_TOKEN;
+    if (!adminToken) return jsonResponse(res, 403, { error: 'admin_not_configured' });
+    const auth = req.headers['authorization'] || '';
+    if (!auth.startsWith('Bearer ') || auth.slice(7) !== adminToken) return jsonResponse(res, 401, { error: 'unauthorized' });
+
+    // create a new verify token and return it in response. Note: you should
+    // copy this token into your secret storage for bot and worker.
+    const newToken = crypto.randomBytes(24).toString('hex');
+    process.env.VERIFY_SERVICE_TOKEN = newToken;
+    console.log('[verify-service] rotated VERIFY_SERVICE_TOKEN (admin)');
+    return jsonResponse(res, 200, { verifyToken: newToken });
+  }
+
+  // Check job status endpoint: /job-status?id=123
+  if (req.method === 'GET' && req.url.startsWith('/job-status')) {
+    try {
+      const url = new URL(req.url, `http://localhost:${PORT}`);
+      const id = url.searchParams.get('id');
+      if (!id) return jsonResponse(res, 400, { error: 'missing id' });
+      const { rows } = await pool.query('select id, status, attempts, result, created_at, updated_at from verify_jobs where id = $1', [id]);
+      if (rows.length === 0) return jsonResponse(res, 404, { error: 'not_found' });
+      return jsonResponse(res, 200, rows[0]);
+    } catch (err) {
+      return jsonResponse(res, 500, { error: err?.message || String(err) });
+    }
+  }
+
   if (req.method === 'POST' && req.url === '/verify') {
     let body = '';
     req.on('data', (chunk) => (body += chunk));
@@ -85,7 +131,7 @@ const server = http.createServer((req, res) => {
       try {
         const payload = JSON.parse(body || '{}');
         const ip = req.socket.remoteAddress || 'unknown';
-        if (isRateLimited(ip)) return jsonResponse(res, 429, { error: 'rate_limited' });
+        if (await isRateLimited(ip)) return jsonResponse(res, 429, { error: 'rate_limited' });
 
         const txSig = await withRetries(() => verifyFixtureProof(payload), 3, 600);
         return jsonResponse(res, 200, { txSig });
@@ -117,11 +163,23 @@ const server = http.createServer((req, res) => {
         if (!fixtureId) return jsonResponse(res, 400, { error: 'missing fixtureId' });
 
         const ip = req.socket.remoteAddress || 'unknown';
-        if (isRateLimited(ip)) return jsonResponse(res, 429, { error: 'rate_limited' });
+        if (await isRateLimited(ip)) return jsonResponse(res, 429, { error: 'rate_limited' });
 
-        const proofPayload = await fetchProofFromTxline(String(fixtureId));
-        const txSig = await withRetries(() => verifyFixtureProof(proofPayload), 3, 600);
-        return jsonResponse(res, 200, { txSig });
+        // Queue the verification job to avoid blocking the HTTP request.
+        // If caller requests synchronous behavior, they can pass { sync: true }.
+        if (payload.sync) {
+          const proofPayload = await fetchProofFromTxline(String(fixtureId));
+          const txSig = await withRetries(() => verifyFixtureProof(proofPayload), 3, 600);
+          return jsonResponse(res, 200, { txSig });
+        }
+
+        const insert = await pool.query(
+          `insert into verify_jobs (fixture_id, status, attempts, created_at, updated_at)
+           values ($1, 'pending', 0, now(), now()) returning id`,
+          [String(fixtureId)]
+        );
+        const jobId = insert.rows[0].id;
+        return jsonResponse(res, 202, { jobId });
       } catch (err) {
         console.error('[verify-service] /verify-by-id error:', err?.message || err);
         const status = err?.statusCode || 500;
@@ -137,6 +195,56 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, () => {
   console.log(`verify-service listening on port ${PORT}`);
+  // Initialize DB-backed job table and start background worker
+  (async function setupQueue() {
+    try {
+      await pool.query(`
+        create table if not exists verify_jobs (
+          id serial primary key,
+          fixture_id text not null,
+          status varchar(20) not null default 'pending',
+          attempts integer not null default 0,
+          result jsonb,
+          created_at timestamptz default now(),
+          updated_at timestamptz default now()
+        )
+      `);
+
+      const POLL_INTERVAL_MS = Number(process.env.VERIFY_POLL_INTERVAL_MS || 5000);
+      setInterval(async () => {
+        const client = await pool.connect();
+        try {
+          await client.query('begin');
+          const { rows } = await client.query("select * from verify_jobs where status = 'pending' order by created_at asc limit 1 for update skip locked");
+          if (rows.length === 0) {
+            await client.query('commit');
+            client.release();
+            return;
+          }
+          const job = rows[0];
+          await client.query("update verify_jobs set status = 'in_progress', updated_at = now() where id = $1", [job.id]);
+          await client.query('commit');
+          client.release();
+
+          try {
+            const proofPayload = await fetchProofFromTxline(String(job.fixture_id));
+            const txSig = await withRetries(() => verifyFixtureProof(proofPayload), 3, 600);
+            await pool.query("update verify_jobs set status='done', result = $2, updated_at = now() where id = $1", [job.id, JSON.stringify({ txSig })]);
+            console.log('[verify-worker] job', job.id, 'done', txSig);
+          } catch (err) {
+            const attempts = job.attempts + 1;
+            const nextStatus = attempts >= 3 ? 'failed' : 'pending';
+            await pool.query("update verify_jobs set attempts = $2, status = $3, result = $4, updated_at = now() where id = $1", [job.id, attempts, nextStatus, JSON.stringify({ error: err.message })]);
+            console.error('[verify-worker] job', job.id, 'failed attempt', attempts, err?.message || err);
+          }
+        } catch (err) {
+          try { client.release(); } catch (e) {}
+        }
+      }, POLL_INTERVAL_MS);
+    } catch (err) {
+      console.error('[verify-service] setupQueue error', err);
+    }
+  })();
 });
 
 process.on('uncaughtException', (err) => {

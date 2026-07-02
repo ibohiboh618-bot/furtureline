@@ -15,10 +15,24 @@ jobs:
         uses: docker/setup-qemu-action@v2
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
-      - name: Build verify worker image
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+      - name: Build and push verify worker image to GHCR
         uses: docker/build-push-action@v4
         with:
           context: ./ingestion/txodds
           file: ./ingestion/txodds/Dockerfile
-          push: false
-          tags: fixtureline-verify:ci
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/fixtureline-verify:${{ github.sha }}
+      - name: Optional: trigger Railway deployment
+        if: ${{ secrets.RAILWAY_API_KEY != '' }}
+        run: |
+          echo "Triggering Railway deployment (project/service must be set in secrets)"
+          curl -X POST "https://api.railway.app/v1/projects/${{ secrets.RAILWAY_PROJECT_ID }}/services/${{ secrets.RAILWAY_SERVICE_ID }}/deployments" \
+            -H "Authorization: Bearer ${{ secrets.RAILWAY_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{"image":"ghcr.io/'"${{ github.repository_owner }}"'/fixtureline-verify:'"${{ github.sha }}"'"}' || true

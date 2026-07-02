@@ -26,13 +26,19 @@ function registerPredictHandlers(bot) {
     const fixtureId = Number(fixtureIdStr);
 
     // Ensure the callback is invoked by the owner of the prediction
-    const { rows } = await pool.query('select user_id from predictions where id = $1', [predictionId]);
+    const { rows } = await pool.query(
+      `select u.telegram_user_id as telegram_id
+       from predictions p
+       join users u on u.id = p.user_id
+       where p.id = $1`,
+      [predictionId]
+    );
     if (rows.length === 0) {
       await ctx.answerCallbackQuery({ text: 'Prediction not found.', show_alert: true });
       return;
     }
-    const ownerId = rows[0].user_id;
-    if (ownerId !== ctx.from.id) {
+    const ownerTelegramId = rows[0].telegram_id;
+    if (ownerTelegramId !== ctx.from.id) {
       await ctx.answerCallbackQuery({ text: 'Only the owner can verify this prediction.', show_alert: true });
       return;
     }
@@ -69,6 +75,16 @@ function registerPredictHandlers(bot) {
               `View on explorer: ${explorerUrl}`,
               { parse_mode: 'HTML' }
             );
+          });
+        }
+        // If the service queued the job, show queued notice with a link to job-status
+        if (resp.status === 202 && resp.data?.jobId) {
+          const jobId = resp.data.jobId;
+          const jobUrl = verifyServiceUrl.replace(/\/$/, '') + `/job-status?id=${jobId}`;
+          const { InlineKeyboard } = require('grammy');
+          const kb = new InlineKeyboard().url('Check job status', jobUrl);
+          return ctx.api.editMessageText(ctx.chat.id, progress.message_id, `Verification queued (job ${jobId}). Check status: ${jobUrl}`, { reply_markup: kb }).catch(async () => {
+            await ctx.reply(`Verification queued (job ${jobId}). Check status: ${jobUrl}`);
           });
         }
       } catch (e) {

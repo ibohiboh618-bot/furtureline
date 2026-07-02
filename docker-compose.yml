@@ -20,6 +20,11 @@ services:
       - '3001:3001'
     depends_on:
       - postgres
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3001/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   db-data:
