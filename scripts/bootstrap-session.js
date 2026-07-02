@@ -36,6 +36,9 @@ if (fs.existsSync(envPath)) {
 const DEVNET_PROGRAM_ID = new PublicKey('6pW64gN1s2uqjHkn1unFeEjAwJkPGHoppGvS715wyP2J');
 const DEVNET_TOKEN_MINT = new PublicKey('4Zao8ocPhmMgq7PdsYWyxvqySMGx7xb9cMftPMkEokRG');
 
+const MAINNET_PROGRAM_ID = new PublicKey('9ExbZjAapQww1vfcisDmrngPinHTEfpjYRWMunJgcKaA');
+const MAINNET_TOKEN_MINT = new PublicKey('Zhw9TVKp68a1QrftncMSd6ELXKDtpVMNuMGr1jNwdeL');
+
 // Minimal fallback IDL in case fetchIdl fails or fails offline
 const FALLBACK_IDL = {
   version: '0.1.0',
@@ -89,11 +92,16 @@ async function main() {
   console.log(`[bootstrap] Connecting to Solana RPC: ${rpcUrl}...`);
   const connection = new Connection(rpcUrl, 'confirmed');
 
+  const isMainnet = !rpcUrl.includes('devnet') && !rpcUrl.includes('localhost') && !rpcUrl.includes('127.0.0.1');
+  const programId = isMainnet ? MAINNET_PROGRAM_ID : DEVNET_PROGRAM_ID;
+  const tokenMint = isMainnet ? MAINNET_TOKEN_MINT : DEVNET_TOKEN_MINT;
+  console.log(`[bootstrap] Using Program ID: ${programId.toBase58()} and Token Mint: ${tokenMint.toBase58()} (${isMainnet ? 'Mainnet' : 'Devnet'})`);
+
   // Request devnet airdrop if needed
   let balance = await connection.getBalance(walletKeypair.publicKey);
   console.log(`[bootstrap] Wallet Balance: ${balance / 1e9} SOL`);
 
-  if (balance === 0 && rpcUrl.includes('devnet')) {
+  if (balance === 0 && !isMainnet) {
     console.log('[bootstrap] Requesting devnet SOL airdrop...');
     try {
       const signature = await connection.requestAirdrop(walletKeypair.publicKey, 1e9); // 1 SOL
@@ -115,7 +123,7 @@ async function main() {
   console.log('[bootstrap] Loading Anchor Program...');
   let idl;
   try {
-    idl = await anchor.Program.fetchIdl(DEVNET_PROGRAM_ID, provider);
+    idl = await anchor.Program.fetchIdl(programId, provider);
     console.log('[bootstrap] Successfully fetched IDL from on-chain.');
   } catch (err) {
     console.log('[bootstrap] Fetching IDL failed, falling back to minimal local definitions:', err.message);
@@ -124,7 +132,7 @@ async function main() {
 
   const program = new anchor.Program(idl, provider);
   // Attach custom property required by auth.js
-  program.subscriptionTokenMint = DEVNET_TOKEN_MINT;
+  program.subscriptionTokenMint = tokenMint;
 
   console.log('[bootstrap] Executing bootstrapSession()...');
   const session = await bootstrapSession({ walletKeypair, program });

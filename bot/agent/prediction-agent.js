@@ -102,17 +102,16 @@ async function getUpcomingFixturesWithOdds() {
        os.implied_prob as "impliedProb"
      from fixtures f
      join lateral (
-       select market, selection, implied_prob
+       select distinct on (market, selection) market, selection, implied_prob
        from odds_snapshots
-       where fixture_id = f.id and market = '1X2'
-       order by captured_at desc
-       limit 3
+       where fixture_id = f.id and market in ('1X2', 'BTTS', 'OU_2_5')
+       order by market, selection, captured_at desc
      ) os on true
      where f.status = 'scheduled'
        and f.kickoff_at > now()
        and f.kickoff_at < now() + interval '7 days'
      order by f.kickoff_at asc
-     limit 60` // ~20 fixtures x 3 selections each
+     limit 200` // enough space for ~20 fixtures with multiple markets
   );
 
   // group rows back into one object per fixture for a cleaner prompt

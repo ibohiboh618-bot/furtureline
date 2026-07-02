@@ -51,8 +51,14 @@ function registerMiscHandlers(bot) {
         { parse_mode: 'HTML' }
       );
     } catch (err) {
-      console.error('[verify]', err.message);
-      await ctx.reply("Couldn't fetch a proof for that fixture right now. Try again shortly.");
+      console.error('[verify] error details:', err.message);
+      if (err.response) {
+        if (err.response.status === 404) {
+          return ctx.reply(`❌ No proof has been archived for fixture <code>${fixtureIdStr}</code> yet. It might not be finished, or its block hasn't been committed to Solana.`, { parse_mode: 'HTML' });
+        }
+        return ctx.reply(`❌ Failed to retrieve proof (API returned status ${err.response.status}). Please try again later.`);
+      }
+      await ctx.reply("❌ Couldn't fetch a proof for that fixture right now. Please ensure the fixture ID is correct or try again shortly.");
     }
   });
 }
@@ -73,9 +79,14 @@ async function fetchMerkleProof(fixtureId, jwt, apiToken) {
       },
     }
   );
+
+  // Defensive parsing supporting variations in TxLINE response properties
+  const merkleRoot = data.merkleRoot || data.root || data.merkle_root || 'Not Available';
+  const batchTimestamp = data.batchTimestamp || data.timestamp || data.ts || new Date().toISOString();
+
   return {
-    merkleRoot: data.merkleRoot,
-    batchTimestamp: data.batchTimestamp,
+    merkleRoot,
+    batchTimestamp,
   };
 }
 

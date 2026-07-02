@@ -52,19 +52,34 @@ async function settleFixture(fixture) {
  * separate branches without touching the rest of the settlement flow.
  */
 function resolveOutcome(prediction, fixture) {
-  if (prediction.market !== '1X2') {
-    return 'void'; // unsupported market for now -- refund rather than guess
-  }
-
   const { home_score: home, away_score: away } = fixture;
   if (home == null || away == null) return 'void';
 
-  let actualResult;
-  if (home > away) actualResult = 'HOME';
-  else if (away > home) actualResult = 'AWAY';
-  else actualResult = 'DRAW';
+  if (prediction.market === '1X2') {
+    let actualResult;
+    if (home > away) actualResult = 'HOME';
+    else if (away > home) actualResult = 'AWAY';
+    else actualResult = 'DRAW';
 
-  return prediction.selection === actualResult ? 'won' : 'lost';
+    return prediction.selection === actualResult ? 'won' : 'lost';
+  }
+
+  if (prediction.market === 'BTTS') {
+    const bothScored = home > 0 && away > 0;
+    const actualResult = bothScored ? 'YES' : 'NO';
+    return prediction.selection === actualResult ? 'won' : 'lost';
+  }
+
+  if (prediction.market.startsWith('OU_')) {
+    const threshold = parseFloat(prediction.market.slice(3).replace('_', '.'));
+    if (Number.isNaN(threshold)) return 'void';
+
+    const totalGoals = home + away;
+    const actualResult = totalGoals > threshold ? 'OVER' : 'UNDER';
+    return prediction.selection === actualResult ? 'won' : 'lost';
+  }
+
+  return 'void'; // unsupported market for now -- refund rather than guess
 }
 
 async function applySettlement(prediction, outcome) {
@@ -115,4 +130,4 @@ if (require.main === module) {
   start();
 }
 
-module.exports = { start };
+module.exports = { start, resolveOutcome, settlePendingPredictions };
