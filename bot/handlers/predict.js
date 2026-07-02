@@ -9,6 +9,7 @@ require('dotenv').config({ path: ['.env', 'bot/.env'] });
 const { Pool } = require('pg');
 const { InlineKeyboard } = require('grammy');
 const { suggestPicks } = require('../agent/prediction-agent');
+const { buildFooterMenu } = require('../ui');
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
@@ -171,7 +172,7 @@ async function handlePredictCommand(ctx) {
     return ctx.reply(
       'Tell me what you are after, e.g.\n' +
       '<code>/predict I like Brazil, keep it low risk</code>',
-      { parse_mode: 'HTML' }
+      { parse_mode: 'HTML', reply_markup: buildFooterMenu() }
     );
   }
 
@@ -186,7 +187,7 @@ async function handlePredictCommand(ctx) {
   });
 
   if (picks.length === 0) {
-    return ctx.reply("I don't have enough upcoming fixtures with odds to suggest anything right now. Try again closer to matchday.");
+    return ctx.reply("I don't have enough upcoming fixtures with odds to suggest anything right now. Try again closer to matchday.", { reply_markup: buildFooterMenu() });
   }
 
   for (const [index, pick] of picks.entries()) {
@@ -236,7 +237,7 @@ async function handleMyPicks(ctx) {
   );
 
   if (rows.length === 0) {
-    return ctx.reply('You do not have any active picks yet. Try /predict to get a fresh suggestion.');
+    return ctx.reply('You do not have any active picks yet. Try /predict to get a fresh suggestion.', { reply_markup: buildFooterMenu() });
   }
 
   // In private chats include a per-prediction Verify button; avoid sending
