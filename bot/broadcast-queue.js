@@ -10,7 +10,7 @@
 // limiter rather than trying to track per-chat limits separately -- with
 // a few hundred broadcast targets this is simpler and safe by construction.
 
-require('dotenv').config();
+require('dotenv').config({ path: ['.env', 'bot/.env'] });
 const { Pool } = require('pg');
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -29,43 +29,52 @@ function init(botInstance) {
 }
 
 async function pollForNewEvents() {
-  const { rows: events } = await pool.query(
-    `select se.*, f.home_team, f.away_team, f.home_score, f.away_score, f.competition
-     from score_events se
-     join fixtures f on f.id = se.fixture_id
-     where se.broadcast_at is null
-       and se.event_type in ('goal', 'red_card', 'half_time', 'full_time')
-     order by se.occurred_at asc
-     limit 50`
-  );
+  try {
+    const { rows: events } = await pool.query(
+      `select se.*, f.home_team, f.away_team, f.home_score, f.away_score, f.competition
+       from score_events se
+       join fixtures f on f.id = se.fixture_id
+       where se.broadcast_at is null
+         and se.event_type in ('goal', 'red_card', 'half_time', 'full_time')
+       order by se.occurred_at asc
+       limit 50`
+    );
 
-  if (events.length === 0) return;
+    if (events.length === 0) return;
 
-  for (const event of events) {
-    const targets = await getTargetsFor(event);
-    for (const target of targets) {
-      queue.push({ event, target });
+    for (const event of events) {
+      const targets = await getTargetsFor(event);
+      for (const target of targets) {
+        queue.push({ event, target });
+      }
+      await pool.query(`update score_events set broadcast_at = now() where id = $1`, [event.id]);
     }
-    await pool.query(`update score_events set broadcast_at = now() where id = $1`, [event.id]);
-  }
 
-  // Trigger draining since new items were added
-  drainQueue();
+    // Trigger draining since new items were added
+    drainQueue();
+  } catch (err) {
+    console.error('[broadcast-queue] poll failed:', err.message);
+  }
 }
 
 async function getTargetsFor(event) {
-  const { rows } = await pool.query(
-    `select * from broadcast_targets
-     where active = true
-       and (subscribed_competitions = '{}' or $1 = any(subscribed_competitions))
-       and (
-         alert_level = 'all_events'
-         or (alert_level = 'goals_and_cards' and $2 in ('goal', 'red_card', 'yellow_card'))
-         or (alert_level = 'goals_only' and $2 = 'goal')
-       )`,
-    [event.competition, event.event_type]
-  );
-  return rows;
+  try {
+    const { rows } = await pool.query(
+      `select * from broadcast_targets
+       where active = true
+         and (subscribed_competitions = '{}' or $1 = any(subscribed_competitions))
+         and (
+           alert_level = 'all_events'
+           or (alert_level = 'goals_and_cards' and $2 in ('goal', 'red_card', 'yellow_card'))
+           or (alert_level = 'goals_only' and $2 = 'goal')
+         )`,
+      [event.competition, event.event_type]
+    );
+    return rows;
+  } catch (err) {
+    console.error('[broadcast-queue] target lookup failed:', err.message);
+    return [];
+  }
 }
 
 async function drainQueue() {
@@ -81,10 +90,14 @@ async function drainQueue() {
       // Telegram returns 403 if the bot was removed/blocked -- deactivate
       // the target so we stop retrying a dead chat forever.
       if (err.error_code === 403) {
-        await pool.query(
-          `update broadcast_targets set active = false where chat_id = $1`,
-          [job.target.chat_id]
-        );
+        try {
+          await pool.query(
+            `update broadcast_targets set active = false where chat_id = $1`,
+            [job.target.chat_id]
+          );
+        } catch (dbErr) {
+          console.error('[broadcast-queue] deactivate target failed:', dbErr.message);
+        }
       }
     }
     await sleep(GLOBAL_SEND_INTERVAL_MS);

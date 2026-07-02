@@ -6,8 +6,9 @@
 // never need to read group chatter, so the default privacy-mode-on
 // behavior (bot only sees explicit commands) is exactly right here.
 
-require('dotenv').config();
+require('dotenv').config({ path: ['.env', 'bot/.env'] });
 const { Pool } = require('pg');
+const { buildGroupAdminGuide, buildGroupOnboardingMessage, getAutoDeleteMs } = require('../ui');
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
@@ -33,14 +34,20 @@ function registerGroupHandlers(bot) {
       });
 
       if (chat.type !== 'channel') {
-        // Channels are one-way; posting a guide message there would just
-        // be noise to subscribers. Groups can see this immediately.
-        await ctx.api.sendMessage(
-          chat.id,
-          "Thanks for adding FixtureLine! I'll post goal alerts and match updates here.\n\n" +
-          "Admins can run /alertlevel to choose how much detail gets posted " +
-          "(goals only, goals and cards, or everything)."
-        ).catch(() => {}); // best-effort, don't crash if perms are odd
+        const onboarding = buildGroupOnboardingMessage({ chatType: chat.type });
+
+        const sent = await ctx.api.sendMessage(chat.id, onboarding.text, {
+          reply_markup: buildGroupAdminGuide(),
+        }).catch(() => null);
+
+        if (sent) {
+          scheduleAutoDelete(ctx.api, {
+            chatId: chat.id,
+            messageId: sent.message_id,
+            chatType: chat.type,
+            kind: 'onboarding',
+          });
+        }
       }
     } else {
       await deactivateBroadcastTarget(chat.id);
@@ -64,9 +71,7 @@ function registerGroupHandlers(bot) {
     const valid = ['goals_only', 'goals_and_cards', 'all_events'];
 
     if (!valid.includes(level)) {
-      return ctx.reply(
-        'Usage: /alertlevel goals_only | goals_and_cards | all_events'
-      );
+      return ctx.reply('Usage: /alertlevel goals_only | goals_and_cards | all_events');
     }
 
     await pool.query(
@@ -76,6 +81,15 @@ function registerGroupHandlers(bot) {
 
     await ctx.reply(`Alert level set to ${level}.`);
   });
+}
+
+function scheduleAutoDelete(api, { chatId, messageId, chatType, kind }) {
+  const timeoutMs = getAutoDeleteMs({ chatType, kind });
+  if (!messageId || timeoutMs <= 0) return;
+
+  setTimeout(() => {
+    api.deleteMessage(chatId, messageId).catch(() => {});
+  }, timeoutMs);
 }
 
 async function upsertBroadcastTarget({ chatId, chatType, title, isAdminBot }) {

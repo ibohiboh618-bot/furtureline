@@ -16,12 +16,14 @@ const anchor = require('@coral-xyz/anchor');
 const {
   Connection,
   Keypair,
-  SystemProgram,
   PublicKey,
+  SystemProgram,
+  Transaction,
 } = require('@solana/web3.js');
 const {
   TOKEN_2022_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
+  createAssociatedTokenAccountInstruction,
   getAssociatedTokenAddressSync,
 } = require('@solana/spl-token');
 
@@ -31,7 +33,8 @@ const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.s
 // Free World Cup tier service levels (see TxODDS docs):
 //   1  = World Cup & Int'l Friendlies, 60s delay
 //   12 = World Cup & Int'l Friendlies, real-time
-const SERVICE_LEVEL_FREE_REALTIME = 12;
+// Devnet currently documents service level 1 for the free tier.
+const SERVICE_LEVEL_FREE_TIER = Number(process.env.TXODDS_SERVICE_LEVEL || 1);
 const SUBSCRIPTION_DURATION_WEEKS = 4; // must be a multiple of 4
 
 /**
@@ -52,7 +55,7 @@ async function getGuestJwt() {
  * Wiring that up is environment-specific (devnet vs mainnet program id),
  * so we accept it as a parameter rather than constructing it here.
  */
-async function subscribeOnChain({ program, wallet, connection, leagues = [] }) {
+async function buildSubscriptionTransaction({ program, wallet, connection }) {
   const [tokenTreasuryPda] = PublicKey.findProgramAddressSync(
     [Buffer.from('token_treasury_v2')],
     program.programId
@@ -77,8 +80,24 @@ async function subscribeOnChain({ program, wallet, connection, leagues = [] }) {
     TOKEN_2022_PROGRAM_ID
   );
 
-  const txSig = await program.methods
-    .subscribe(SERVICE_LEVEL_FREE_REALTIME, SUBSCRIPTION_DURATION_WEEKS)
+  const accountInfo = await connection.getAccountInfo(userTokenAccount);
+  const instructions = [];
+
+  if (!accountInfo) {
+    instructions.push(
+      createAssociatedTokenAccountInstruction(
+        wallet.publicKey,
+        userTokenAccount,
+        wallet.publicKey,
+        program.subscriptionTokenMint,
+        TOKEN_2022_PROGRAM_ID,
+        ASSOCIATED_TOKEN_PROGRAM_ID
+      )
+    );
+  }
+
+  const subscribeIx = await program.methods
+    .subscribe(SERVICE_LEVEL_FREE_TIER, SUBSCRIPTION_DURATION_WEEKS)
     .accounts({
       user: wallet.publicKey,
       pricingMatrix: pricingMatrixPda,
@@ -90,9 +109,16 @@ async function subscribeOnChain({ program, wallet, connection, leagues = [] }) {
       associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       systemProgram: SystemProgram.programId,
     })
-    .rpc();
+    .instruction();
 
-  await connection.confirmTransaction(txSig, 'confirmed');
+  instructions.push(subscribeIx);
+  return new Transaction().add(...instructions);
+}
+
+async function subscribeOnChain({ program, wallet, connection, leagues = [] }) {
+  const tx = await buildSubscriptionTransaction({ program, wallet, connection });
+  const signer = wallet.secretKey ? wallet : wallet.payer || wallet;
+  const txSig = await program.provider.sendAndConfirm(tx, [signer]);
   return txSig;
 }
 
@@ -126,7 +152,7 @@ async function runFullActivation({ walletKeypair, program }) {
 
   const txSig = await subscribeOnChain({
     program,
-    wallet: { publicKey: walletKeypair.publicKey },
+    wallet: walletKeypair,
     connection,
     leagues: [], // empty = standard free World Cup bundle
   });
@@ -157,10 +183,11 @@ async function refreshJwtOnly() {
 
 module.exports = {
   getGuestJwt,
+  buildSubscriptionTransaction,
   subscribeOnChain,
   activateApiToken,
   runFullActivation,
   refreshJwtOnly,
-  SERVICE_LEVEL_FREE_REALTIME,
+  SERVICE_LEVEL_FREE_TIER,
   SUBSCRIPTION_DURATION_WEEKS,
 };

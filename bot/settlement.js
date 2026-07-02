@@ -7,7 +7,7 @@
 // honest way to tie the prediction/markets and fan-experience ideas
 // together without building an actual betting exchange.
 
-require('dotenv').config();
+require('dotenv').config({ path: ['.env', 'bot/.env'] });
 const { Pool } = require('pg');
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -21,16 +21,20 @@ function start() {
 }
 
 async function settlePendingPredictions() {
-  const { rows: finishedFixtures } = await pool.query(
-    `select distinct f.id, f.home_score, f.away_score
-     from fixtures f
-     join predictions p on p.fixture_id = f.id
-     where f.status = 'finished'
-       and p.status = 'pending'`
-  );
+  try {
+    const { rows: finishedFixtures } = await pool.query(
+      `select distinct f.id, f.home_score, f.away_score
+       from fixtures f
+       join predictions p on p.fixture_id = f.id
+       where f.status = 'finished'
+         and p.status = 'pending'`
+    );
 
-  for (const fixture of finishedFixtures) {
-    await settleFixture(fixture);
+    for (const fixture of finishedFixtures) {
+      await settleFixture(fixture);
+    }
+  } catch (err) {
+    console.error('[settlement] poll failed:', err.message);
   }
 }
 

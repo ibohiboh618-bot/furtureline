@@ -4,63 +4,188 @@
 // experience and give the on-chain angle something concrete to point at
 // in a demo, rather than just asserting "it's on Solana" in prose.
 
+require('dotenv').config({ path: ['.env', 'bot/.env'] });
 const { Pool } = require('pg');
 const axios = require('axios');
+const { buildMainMenu } = require('../ui');
+const { formatInsightsText } = require('../market-insights');
+const { handlePredictCommand, handleMyPicks } = require('./predict');
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const TXLINE_BASE_URL = process.env.TXLINE_BASE_URL || 'https://txline.txodds.com';
 
 function registerMiscHandlers(bot) {
-  bot.command('leaderboard', async (ctx) => {
-    const { rows } = await pool.query(
-      `select telegram_username, display_name, points_balance
-       from users
-       order by points_balance desc
-       limit 10`
+  bot.command('leaderboard', handleLeaderboard);
+  bot.command('verify', handleVerify);
+  bot.command('markets', handleMarkets);
+  bot.command('help', handleHelp);
+
+  bot.callbackQuery(/^menu:(predict|mypicks|leaderboard|verify|markets|help)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const action = getMenuAction(ctx.match[1]);
+    if (action === 'predict') return handlePredictCommand(ctx);
+    if (action === 'mypicks') return handleMyPicks(ctx);
+    if (action === 'leaderboard') return handleLeaderboard(ctx);
+    if (action === 'verify') return handleVerify(ctx);
+    if (action === 'markets') return handleMarkets(ctx);
+    return handleHelp(ctx);
+  });
+}
+
+function getMenuAction(name) {
+  switch (name) {
+    case 'predict':
+      return 'predict';
+    case 'mypicks':
+      return 'mypicks';
+    case 'leaderboard':
+      return 'leaderboard';
+    case 'verify':
+      return 'verify';
+    case 'markets':
+      return 'markets';
+    case 'help':
+      return 'help';
+    default:
+      return null;
+  }
+}
+
+async function handleLeaderboard(ctx) {
+  const { rows } = await pool.query(
+    `select telegram_username, display_name, points_balance
+     from users
+     order by points_balance desc
+     limit 10`
+  );
+
+  if (rows.length === 0) {
+    return ctx.reply('No picks have been made yet. Be the first to start the scoreboard with /predict.');
+  }
+
+  const lines = rows.map((u, i) => {
+    const name = u.telegram_username ? `@${u.telegram_username}` : (u.display_name || 'Anonymous');
+    return `${i + 1}. ${name} -- ${u.points_balance} pts`;
+  });
+
+  await ctx.reply(['Leaderboard', ...lines].join('\n'));
+}
+
+async function handleHelp(ctx) {
+  const text = [
+    'FixtureLine is a football intelligence bot built for fans.',
+    '',
+    'It combines live match updates, market insights, AI-assisted picks, and on-chain proof.',
+    '',
+    'Quick actions:',
+    '• Predict — get AI-assisted picks',
+    '• Markets — inspect upcoming odds and market context',
+    '• My Picks — review your active picks',
+    '• Verify — inspect a fixture’s on-chain proof',
+  ].join('\n');
+
+  await ctx.reply(text, { reply_markup: buildMainMenu() });
+}
+
+async function handleMarkets(ctx) {
+  const fixtures = await getMarketInsights();
+  const text = [
+    'Upcoming market insights 📈',
+    '',
+    formatInsightsText(fixtures),
+  ].join('\n');
+
+  await ctx.reply(text, { reply_markup: buildMainMenu() });
+}
+
+async function handleVerify(ctx) {
+  const fixtureIdStr = getVerifyInput(ctx);
+  if (!fixtureIdStr || Number.isNaN(Number(fixtureIdStr))) {
+    return ctx.reply('Usage: /verify <fixtureId>');
+  }
+
+  await ctx.replyWithChatAction('typing');
+
+  try {
+    const { jwt, apiToken } = await getActiveSession();
+    const proof = await fetchMerkleProof(fixtureIdStr, jwt, apiToken);
+
+    await ctx.reply(
+      `This fixture's data batch is anchored on Solana.\n` +
+      `Merkle root: <code>${proof.merkleRoot}</code>\n` +
+      `Batch timestamp: ${proof.batchTimestamp}\n\n` +
+      `Anyone can independently verify this against the on-chain root using TxODDS's public validate instruction.`,
+      { parse_mode: 'HTML' }
     );
-
-    if (rows.length === 0) {
-      return ctx.reply('No one has made a pick yet. Be the first with /predict.');
-    }
-
-    const lines = rows.map((u, i) => {
-      const name = u.telegram_username ? `@${u.telegram_username}` : (u.display_name || 'Anonymous');
-      return `${i + 1}. ${name} -- ${u.points_balance} pts`;
-    });
-
-    await ctx.reply(['Leaderboard', ...lines].join('\n'));
-  });
-
-  bot.command('verify', async (ctx) => {
-    const fixtureIdStr = ctx.match?.trim();
-    if (!fixtureIdStr || Number.isNaN(Number(fixtureIdStr))) {
-      return ctx.reply('Usage: /verify <fixtureId>');
-    }
-
-    await ctx.replyWithChatAction('typing');
-
-    try {
-      const { jwt, apiToken } = await getActiveSession();
-      const proof = await fetchMerkleProof(fixtureIdStr, jwt, apiToken);
-
-      await ctx.reply(
-        `This fixture's data batch is anchored on Solana.\n` +
-        `Merkle root: <code>${proof.merkleRoot}</code>\n` +
-        `Batch timestamp: ${proof.batchTimestamp}\n\n` +
-        `Anyone can independently verify this against the on-chain root using TxODDS's public validate instruction.`,
-        { parse_mode: 'HTML' }
-      );
-    } catch (err) {
-      console.error('[verify] error details:', err.message);
-      if (err.response) {
-        if (err.response.status === 404) {
-          return ctx.reply(`❌ No proof has been archived for fixture <code>${fixtureIdStr}</code> yet. It might not be finished, or its block hasn't been committed to Solana.`, { parse_mode: 'HTML' });
-        }
-        return ctx.reply(`❌ Failed to retrieve proof (API returned status ${err.response.status}). Please try again later.`);
+  } catch (err) {
+    console.error('[verify] error details:', err.message);
+    if (err.response) {
+      if (err.response.status === 404) {
+        return ctx.reply(`❌ No proof has been archived for fixture <code>${fixtureIdStr}</code> yet. It might not be finished, or its block hasn't been committed to Solana.`, { parse_mode: 'HTML' });
       }
-      await ctx.reply("❌ Couldn't fetch a proof for that fixture right now. Please ensure the fixture ID is correct or try again shortly.");
+      return ctx.reply(`❌ Failed to retrieve proof (API returned status ${err.response.status}). Please try again later.`);
     }
-  });
+    await ctx.reply("❌ Couldn't fetch a proof for that fixture right now. Please ensure the fixture ID is correct or try again shortly.");
+  }
+}
+
+function getVerifyInput(ctx) {
+  if (!ctx) return null;
+
+  if (typeof ctx.match === 'string') return ctx.match.trim();
+  if (ctx.match && typeof ctx.match === 'object') {
+    if (typeof ctx.match[1] === 'string') return ctx.match[1].trim();
+    if (typeof ctx.match.trim === 'function') return ctx.match.trim();
+  }
+
+  if (typeof ctx.message?.text === 'string') {
+    const parts = ctx.message.text.trim().split(/\s+/);
+    if (parts.length > 1) return parts[1];
+  }
+
+  return null;
+}
+
+async function getMarketInsights() {
+  const { rows } = await pool.query(
+    `select
+       f.id as fixture_id,
+       f.home_team,
+       f.away_team,
+       os.market,
+       os.selection,
+       os.implied_prob as implied_prob
+     from fixtures f
+     join lateral (
+       select distinct on (market, selection) market, selection, implied_prob
+       from odds_snapshots
+       where fixture_id = f.id and market in ('1X2', 'BTTS', 'OU_2_5')
+       order by market, selection, captured_at desc
+     ) os on true
+     where f.status = 'scheduled'
+       and f.kickoff_at > now()
+       and f.kickoff_at < now() + interval '3 days'
+     order by f.kickoff_at asc
+     limit 6`
+  );
+
+  const byFixture = new Map();
+  for (const row of rows) {
+    if (!byFixture.has(row.fixture_id)) {
+      byFixture.set(row.fixture_id, {
+        homeTeam: row.home_team,
+        awayTeam: row.away_team,
+        odds: [],
+      });
+    }
+    byFixture.get(row.fixture_id).odds.push({
+      market: row.market,
+      selection: row.selection,
+      impliedProb: Number(row.implied_prob),
+    });
+  }
+
+  return Array.from(byFixture.values());
 }
 
 async function getActiveSession() {
@@ -90,4 +215,11 @@ async function fetchMerkleProof(fixtureId, jwt, apiToken) {
   };
 }
 
-module.exports = { registerMiscHandlers };
+module.exports = {
+  registerMiscHandlers,
+  getMenuAction,
+  handleLeaderboard,
+  handleHelp,
+  handleVerify,
+  handleMarkets,
+};

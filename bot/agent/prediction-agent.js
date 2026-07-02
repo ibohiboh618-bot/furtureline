@@ -11,12 +11,13 @@
 // submission" rule and for not quietly drifting into something that looks
 // like automated betting.
 
-require('dotenv').config();
+require('dotenv').config({ path: ['.env', 'bot/.env'] });
 const Groq = require('groq-sdk');
 const { Pool } = require('pg');
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const groqApiKey = process.env.GROQ_API_KEY?.trim();
+const groq = groqApiKey ? new Groq({ apiKey: groqApiKey }) : null;
 
 const MODEL = 'llama-3.3-70b-versatile';
 
@@ -45,6 +46,11 @@ Rules:
  * @returns {Promise<Array<{fixtureId, market, selection, impliedProb, reasoning}>>}
  */
 async function suggestPicks({ preferenceText, riskPreference, favoriteTeams }) {
+  if (!groq) {
+    console.warn('[prediction-agent] GROQ_API_KEY missing; returning empty suggestions');
+    return [];
+  }
+
   const fixtures = await getUpcomingFixturesWithOdds();
 
   if (fixtures.length === 0) {
