@@ -89,7 +89,7 @@ function registerPredictHandlers(bot) {
       return;
     }
 
-    await confirmPrediction({
+    const prediction = await confirmPrediction({
       userId: user.id,
       fixtureId,
       market,
@@ -104,6 +104,15 @@ function registerPredictHandlers(bot) {
       `${selection} is now in your active picks with ${DEFAULT_STAKE} pts staked.\n` +
       `You’ll get an update when the match settles.`
     );
+
+    // Send a follow-up message with Verify button so user can trigger on-chain check
+    try {
+      const { InlineKeyboard } = require('grammy');
+      const kb = new InlineKeyboard().text('Verify this fixture', `verify_pick:${prediction.id}:${fixtureId}`);
+      await ctx.reply('If you want to validate this fixture on-chain, tap Verify below.', { reply_markup: kb });
+    } catch (e) {
+      // ignore errors here
+    }
   });
 }
 

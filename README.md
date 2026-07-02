@@ -108,3 +108,37 @@ bot/
   published IDL before `bootstrapSession()` will run.
 - Settlement only handles the `1X2` market. Extend `resolveOutcome()` in
   `settlement.js` for BTTS/over-under once those are wired into the agent.
+
+## Verify worker (deployment)
+
+The repository includes a small verify worker under `ingestion/txodds` that
+performs on-chain validation using Anchor. Because Anchor and some Solana
+ecosystem libraries are ESM-heavy, the verify worker should run as a
+separate service (not inside the Telegram bot process).
+
+Files of interest:
+
+- `ingestion/txodds/verify-service.js` — HTTP worker exposing `/health`,
+  `/verify` and `/verify-by-id`.
+- `ingestion/txodds/package.json` — focused dependencies for the worker.
+- `ingestion/txodds/Dockerfile` — example Dockerfile to build the worker image.
+- `ingestion/txodds/railway.json` and `ingestion/txodds/Procfile` — sample
+  Railway deployment config for the verify worker.
+
+Local run (verify worker):
+
+```bash
+cd ingestion/txodds
+npm ci
+npm run verify-service
+```
+
+Or with Docker:
+
+```bash
+docker build -t fixtureline-verify:latest ingestion/txodds
+docker run -e DATABASE_URL=... -e VERIFY_SERVICE_TOKEN=secret -p 3001:3001 fixtureline-verify:latest
+```
+
+Set `VERIFY_SERVICE_URL` and optionally `VERIFY_SERVICE_TOKEN` in the bot
+service environment so the bot can call `/verify-by-id` on behalf of users.
