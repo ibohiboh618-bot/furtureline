@@ -18,8 +18,46 @@ const RATE_LIMIT_MAX = Number(process.env.VERIFY_RATE_MAX || 20);
 const ipCounters = new Map();
 
 let redisClient = null;
+let bullConnection = null;
+let verifyQueue = null;
 if (process.env.REDIS_URL) {
   redisClient = new Redis(process.env.REDIS_URL);
+  // separate ioredis instance for bullmq
+  bullConnection = new Redis(process.env.REDIS_URL);
+  const { Queue, Worker } = require('bullmq');
+  verifyQueue = new Queue('verify', { connection: bullConnection });
+
+  // Start a Bull worker to process verification jobs
+  const worker = new Worker('verify', async (job) => {
+    const fixtureId = job.data.fixtureId;
+    try {
+      // persist a job row in Postgres for visibility
+      await pool.query(
+        `insert into verify_jobs (id, fixture_id, status, attempts, created_at, updated_at)
+         values ($1, $2, 'pending', 0, now(), now())
+         on conflict (id) do nothing`,
+        [job.id, String(fixtureId)]
+      );
+
+      const proofPayload = await fetchProofFromTxline(String(fixtureId));
+      const txSig = await withRetries(() => verifyFixtureProof(proofPayload), 3, 600);
+
+      await pool.query("update verify_jobs set status='done', result = $2, updated_at = now() where id = $1", [job.id, JSON.stringify({ txSig })]);
+      console.log('[verify-worker] job', job.id, 'done', txSig);
+      return { txSig };
+    } catch (err) {
+      // increment attempts and mark failed if too many
+      const attempts = (job.attempts || 0) + 1;
+      const nextStatus = attempts >= 3 ? 'failed' : 'pending';
+      await pool.query("update verify_jobs set attempts = $2, status = $3, result = $4, updated_at = now() where id = $1", [job.id, attempts, nextStatus, JSON.stringify({ error: err.message })]);
+      console.error('[verify-worker] job', job.id, 'failed', err?.message || err);
+      throw err;
+    }
+  }, { connection: bullConnection });
+
+  worker.on('failed', (job, err) => {
+    console.error('[bull-worker] job failed', job.id, err?.message || err);
+  });
 }
 
 // Rate limiter: prefer Redis when configured
@@ -116,6 +154,17 @@ const server = http.createServer((req, res) => {
       const url = new URL(req.url, `http://localhost:${PORT}`);
       const id = url.searchParams.get('id');
       if (!id) return jsonResponse(res, 400, { error: 'missing id' });
+      // If Redis/Bull is configured, prefer to fetch job status from Bull
+      if (verifyQueue && bullConnection) {
+        const { Job } = require('bullmq');
+        const job = await Job.fromId(bullConnection, 'verify', id).catch(() => null);
+        if (job) {
+          const state = await job.getState();
+          const returnValue = await job.returnvalue;
+          return jsonResponse(res, 200, { id: job.id, state, returnValue, attempts: job.attemptsMade });
+        }
+      }
+
       const { rows } = await pool.query('select id, status, attempts, result, created_at, updated_at from verify_jobs where id = $1', [id]);
       if (rows.length === 0) return jsonResponse(res, 404, { error: 'not_found' });
       return jsonResponse(res, 200, rows[0]);
@@ -171,6 +220,18 @@ const server = http.createServer((req, res) => {
           const proofPayload = await fetchProofFromTxline(String(fixtureId));
           const txSig = await withRetries(() => verifyFixtureProof(proofPayload), 3, 600);
           return jsonResponse(res, 200, { txSig });
+        }
+
+        if (verifyQueue) {
+          // enqueue to Bull and also create a DB row for visibility
+          const job = await verifyQueue.add('verify-fixture', { fixtureId });
+          await pool.query(
+            `insert into verify_jobs (id, fixture_id, status, attempts, created_at, updated_at)
+             values ($1, $2, 'pending', 0, now(), now())
+             on conflict (id) do nothing`,
+            [job.id, String(fixtureId)]
+          );
+          return jsonResponse(res, 202, { jobId: job.id });
         }
 
         const insert = await pool.query(
