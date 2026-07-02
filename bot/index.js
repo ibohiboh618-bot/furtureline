@@ -80,9 +80,11 @@ async function main() {
         await bot.api.setWebhook(webhookUrl, { drop_pending_updates: true });
       } catch (e) {
         console.error('[bot] setWebhook failed:', e.message || e);
-        const fallback = (process.env.TELEGRAM_FALLBACK_POLLING || '').toLowerCase() === 'true';
+        const strict = (process.env.TELEGRAM_STRICT_WEBHOOK || '').toLowerCase() === 'true';
+        const fallback = !strict; // by default we fall back to polling to avoid crashes
         if (fallback) {
-          console.warn('[bot] falling back to long polling because TELEGRAM_FALLBACK_POLLING=true');
+          console.warn('[bot] falling back to long polling (TELEGRAM_STRICT_WEBHOOK is not set)');
+          console.warn('[bot] NOTE: consider fixing TELEGRAM_WEBHOOK_URL or set TELEGRAM_STRICT_WEBHOOK=true to fail fast');
           console.log('[bot] starting long polling...');
           await bot.start();
           return;
