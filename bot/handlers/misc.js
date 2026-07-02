@@ -108,13 +108,13 @@ async function handleVerify(ctx) {
 
   try {
     const { jwt, apiToken } = await getActiveSession();
-    const proofResponse = await fetchMerkleProof(fixtureIdStr, jwt, apiToken);
-
     const verifyServiceUrl = process.env.VERIFY_SERVICE_URL;
     if (verifyServiceUrl) {
       try {
-        const url = verifyServiceUrl.replace(/\/$/, '') + '/verify';
-        const resp = await axios.post(url, proofResponse.proofPayload, { timeout: 20000 });
+        const url = verifyServiceUrl.replace(/\/$/, '') + '/verify-by-id';
+        const headers = {};
+        if (process.env.VERIFY_SERVICE_TOKEN) headers['Authorization'] = `Bearer ${process.env.VERIFY_SERVICE_TOKEN}`;
+        const resp = await axios.post(url, { fixtureId: fixtureIdStr }, { timeout: 20000, headers });
         const txSig = resp.data?.txSig || resp.data?.tx_sig || resp.data?.sig;
         if (txSig) {
           const rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
@@ -131,18 +131,24 @@ async function handleVerify(ctx) {
         }
       } catch (e) {
         console.error('[verify] verify-service call failed:', e?.message || e);
-        // fall through to show proof details and instructions
+        // fall through to fetch proof and show details below
       }
     }
 
-    // Fallback: show proof details and instruct operator to run verification
-    await ctx.reply(
-      `This fixture's data batch is anchored on Solana.\n` +
-      `Merkle root: <code>${proofResponse.merkleRoot}</code>\n` +
-      `Batch timestamp: ${proofResponse.batchTimestamp}\n\n` +
-      `To perform on-chain validation, either run the verification worker locally or deploy the verify service and set VERIFY_SERVICE_URL in the bot process.`,
-      { parse_mode: 'HTML', reply_markup: buildMainMenu() }
-    );
+    // Either verify service wasn't configured or it failed — fetch proof and show details
+    try {
+      const proofResponse = await fetchMerkleProof(fixtureIdStr, jwt, apiToken);
+      await ctx.reply(
+        `This fixture's data batch is anchored on Solana.\n` +
+        `Merkle root: <code>${proofResponse.merkleRoot}</code>\n` +
+        `Batch timestamp: ${proofResponse.batchTimestamp}\n\n` +
+        `To perform on-chain validation, either run the verification worker locally or deploy the verify service and set VERIFY_SERVICE_URL in the bot process.`,
+        { parse_mode: 'HTML', reply_markup: buildMainMenu() }
+      );
+    } catch (e) {
+      console.error('[verify] fallback fetch proof failed:', e?.message || e);
+      await ctx.reply("❌ Couldn't fetch a proof for that fixture right now. Please ensure the fixture ID is correct or try again shortly.", { reply_markup: buildMainMenu() });
+    }
   } catch (err) {
     console.error('[verify] error details:', err.message);
     if (err.response) {
