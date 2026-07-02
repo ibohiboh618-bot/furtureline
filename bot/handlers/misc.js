@@ -10,6 +10,7 @@ const axios = require('axios');
 const { buildMainMenu } = require('../ui');
 const { formatInsightsText } = require('../market-insights');
 const { handlePredictCommand, handleMyPicks } = require('./predict');
+const { verifyFixtureProof } = require('../ingestion/txodds/verify');
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const TXLINE_BASE_URL = process.env.TXLINE_BASE_URL || 'https://txline.txodds.com';
@@ -101,31 +102,37 @@ async function handleMarkets(ctx) {
 async function handleVerify(ctx) {
   const fixtureIdStr = getVerifyInput(ctx);
   if (!fixtureIdStr || Number.isNaN(Number(fixtureIdStr))) {
-    return ctx.reply('Usage: /verify <fixtureId>');
+    return ctx.reply('Usage: /verify <fixtureId>', { reply_markup: buildMainMenu() });
   }
 
   await ctx.replyWithChatAction('typing');
 
   try {
     const { jwt, apiToken } = await getActiveSession();
-    const proof = await fetchMerkleProof(fixtureIdStr, jwt, apiToken);
+    const proofResponse = await fetchMerkleProof(fixtureIdStr, jwt, apiToken);
+    const txSig = await verifyFixtureProof(proofResponse.proofPayload);
+    const rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
+    const explorerUrl = rpcUrl.includes('devnet')
+      ? `https://explorer.solana.com/tx/${txSig}?cluster=devnet`
+      : `https://explorer.solana.com/tx/${txSig}`;
 
     await ctx.reply(
       `This fixture's data batch is anchored on Solana.\n` +
-      `Merkle root: <code>${proof.merkleRoot}</code>\n` +
-      `Batch timestamp: ${proof.batchTimestamp}\n\n` +
-      `Anyone can independently verify this against the on-chain root using TxODDS's public validate instruction.`,
-      { parse_mode: 'HTML' }
+      `Merkle root: <code>${proofResponse.merkleRoot}</code>\n` +
+      `Batch timestamp: ${proofResponse.batchTimestamp}\n\n` +
+      `Validation transaction: <code>${txSig}</code>\n` +
+      `View on explorer: ${explorerUrl}`,
+      { parse_mode: 'HTML', reply_markup: buildMainMenu() }
     );
   } catch (err) {
     console.error('[verify] error details:', err.message);
     if (err.response) {
       if (err.response.status === 404) {
-        return ctx.reply(`❌ No proof has been archived for fixture <code>${fixtureIdStr}</code> yet. It might not be finished, or its block hasn't been committed to Solana.`, { parse_mode: 'HTML' });
+        return ctx.reply(`❌ No proof has been archived for fixture <code>${fixtureIdStr}</code> yet. It might not be finished, or its block hasn't been committed to Solana.`, { parse_mode: 'HTML', reply_markup: buildMainMenu() });
       }
-      return ctx.reply(`❌ Failed to retrieve proof (API returned status ${err.response.status}). Please try again later.`);
+      return ctx.reply(`❌ Failed to retrieve proof (API returned status ${err.response.status}). Please try again later.`, { reply_markup: buildMainMenu() });
     }
-    await ctx.reply("❌ Couldn't fetch a proof for that fixture right now. Please ensure the fixture ID is correct or try again shortly.");
+    await ctx.reply("❌ Couldn't fetch a proof for that fixture right now. Please ensure the fixture ID is correct or try again shortly.", { reply_markup: buildMainMenu() });
   }
 }
 
@@ -206,12 +213,13 @@ async function fetchMerkleProof(fixtureId, jwt, apiToken) {
   );
 
   // Defensive parsing supporting variations in TxLINE response properties
-  const merkleRoot = data.merkleRoot || data.root || data.merkle_root || 'Not Available';
-  const batchTimestamp = data.batchTimestamp || data.timestamp || data.ts || new Date().toISOString();
+  const merkleRoot = data.merkleRoot || data.root || data.merkle_root || data.merkleRootHash || 'Not Available';
+  const batchTimestamp = data.batchTimestamp || data.timestamp || data.ts || data.batch_timestamp || new Date().toISOString();
 
   return {
     merkleRoot,
     batchTimestamp,
+    proofPayload: data,
   };
 }
 

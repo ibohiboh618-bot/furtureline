@@ -28,14 +28,15 @@ const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN);
 
 bot.command('start', async (ctx) => {
   const content = buildStartCarouselContent({
-    title: 'Welcome to FixtureLine.',
+    title: 'Welcome to FixtureLine — your live football intelligence hub.',
+    quickStart: 'Ready to make a pick? Tap Predict or type /predict now.',
     commands: [
-      '/predict <what you are after> — get AI-suggested picks',
-      '/mypicks — your recent picks',
-      '/leaderboard — top players by points',
-      '/verify <fixtureId> — check a match\'s on-chain proof',
+      '⚡ /predict <what you are after> — get AI-suggested picks',
+      '📌 /mypicks — review your active and recent picks',
+      '🏆 /leaderboard — see the top players by points',
+      '🔎 /verify <fixtureId> — validate a match with on-chain proof',
     ],
-    footer: 'Add me to a group or channel to get live goal alerts.',
+    footer: 'Add me to a group or channel for live goal alerts and match edge highlights.',
   });
   await ctx.reply(content.text, {
     reply_markup: content.reply_markup,

@@ -17,16 +17,16 @@ function buildMainMenu({ botUsername = 'FixtureLineBot' } = {}) {
   return keyboard;
 }
 
-function buildStartCarouselContent({ title = 'Welcome to FixtureLine.', commands = [], footer = 'Add me to a group or channel to get live goal alerts.' } = {}) {
+function buildStartCarouselContent({ title = 'Welcome to FixtureLine.', quickStart = null, commands = [], footer = 'Add me to a group or channel to get live goal alerts.' } = {}) {
   const lines = [
     title,
-    '',
-    ...commands,
-    '',
-    footer,
-    '',
-    'Tap a button below to get started.',
   ];
+
+  if (quickStart) {
+    lines.push('', quickStart);
+  }
+
+  lines.push('', ...commands, '', footer, '', 'Tap a button below to get started.');
 
   return {
     text: lines.join('\n'),

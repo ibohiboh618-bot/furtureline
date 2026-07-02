@@ -3,6 +3,21 @@
 Telegram bot for the TxODDS World Cup hackathon. Live match updates, AI-suggested
 predictions (points-based, not real money), and on-chain verified results.
 
+## What users see on /start
+
+Welcome to FixtureLine — your live football intelligence hub.
+
+- ⚡ `/predict <what you are after>` — get AI-suggested picks
+- 📌 `/mypicks` — review your active and recent picks
+- 🏆 `/leaderboard` — see the top players by points
+- 🔎 `/verify <fixtureId>` — validate a match with on-chain proof
+
+Add the bot to a group or channel for live goal alerts and match edge highlights.
+
+## Live devnet verification
+
+The bot fetches TxODDS proof payloads for a fixture and validates them on Solana using the devnet `validate_fixture` instruction. `/verify <fixtureId>` now returns the Merkle root, batch timestamp, and a Solana explorer link for the validation transaction.
+
 ## Why three separate processes
 
 Run these independently, not as one monolith:
@@ -91,8 +106,5 @@ bot/
 - `auth.js` assumes an Anchor `program` object is constructed elsewhere
   (devnet vs mainnet program ID, IDL loading) -- wire that up per TxODDS's
   published IDL before `bootstrapSession()` will run.
-- `misc.js`'s `/verify` hits a `/api/fixtures/:id/proof` endpoint as a
-  placeholder shape -- confirm the exact Merkle-proof endpoint path and
-  response shape against the live TxODDS API reference before demo day.
 - Settlement only handles the `1X2` market. Extend `resolveOutcome()` in
   `settlement.js` for BTTS/over-under once those are wired into the agent.
