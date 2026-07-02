@@ -1,0 +1,25 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: fixtureline
+      POSTGRES_USER: fixtureline
+      POSTGRES_PASSWORD: fixtureline
+    ports:
+      - '5432:5432'
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+  verify:
+    build: ./ingestion/txodds
+    environment:
+      DATABASE_URL: postgres://fixtureline:fixtureline@postgres:5432/fixtureline
+      VERIFY_SERVICE_TOKEN: changeme
+    ports:
+      - '3001:3001'
+    depends_on:
+      - postgres
+
+volumes:
+  db-data:

@@ -38,7 +38,8 @@ function registerPredictHandlers(bot) {
     }
 
     await ctx.answerCallbackQuery();
-
+    // Provide progress feedback: send a placeholder message and edit it later
+    const progress = await ctx.reply('Verifying... this may take a moment.');
     // Call the verify service (if configured) and show result; otherwise instruct
     // the user how to run verification.
     const verifyServiceUrl = process.env.VERIFY_SERVICE_URL;
@@ -55,20 +56,39 @@ function registerPredictHandlers(bot) {
           const explorerUrl = rpcUrl.includes('devnet')
             ? `https://explorer.solana.com/tx/${txSig}?cluster=devnet`
             : `https://explorer.solana.com/tx/${txSig}`;
-
-          return await ctx.reply(
+          // Edit the in-progress message with the result
+          return ctx.api.editMessageText(ctx.chat.id, progress.message_id,
             `On-chain validation submitted.\n` +
             `Validation transaction: <code>${txSig}</code>\n` +
             `View on explorer: ${explorerUrl}`,
             { parse_mode: 'HTML' }
-          );
+          ).catch(async () => {
+            await ctx.reply(
+              `On-chain validation submitted.\n` +
+              `Validation transaction: <code>${txSig}</code>\n` +
+              `View on explorer: ${explorerUrl}`,
+              { parse_mode: 'HTML' }
+            );
+          });
         }
       } catch (e) {
         console.error('[predict.verify_pick] verify service error:', e?.message || e);
       }
     }
 
-    await ctx.reply('Verification service unavailable. You can run verification locally or ask an admin to deploy the verify-worker.');
+    await ctx.api.editMessageText(ctx.chat.id, progress.message_id, 'Verification service unavailable. You can run verification locally or ask an admin to deploy the verify-worker.').catch(() => {
+      ctx.reply('Verification service unavailable. You can run verification locally or ask an admin to deploy the verify-worker.');
+    });
+  });
+
+  // Explain what Verify does (short helper) and offer to run verification
+  bot.callbackQuery(/^verify_explain:(\d+):(\d+)$/, async (ctx) => {
+    if (!ctx.from) return;
+    const [, predictionIdStr, fixtureIdStr] = ctx.match;
+    await ctx.answerCallbackQuery();
+    await ctx.reply('Verify fetches the merkle proof archived by TxODDS for this fixture and submits it to the on-chain validator. This proves the batch that contained the fixture was anchored. Tap Verify to run it now.');
+    const kb = new InlineKeyboard().text('Run Verify', `verify_pick:${predictionIdStr}:${fixtureIdStr}`);
+    await ctx.reply('Ready?', { reply_markup: kb });
   });
 
   bot.callbackQuery(/^confirm_pick:(\d+):([A-Z0-9_]+):([A-Z]+)$/, async (ctx) => {
@@ -105,11 +125,14 @@ function registerPredictHandlers(bot) {
       `You’ll get an update when the match settles.`
     );
 
-    // Send a follow-up message with Verify button so user can trigger on-chain check
+    // Send a follow-up message with Explain + Verify buttons so user can learn or trigger verification
     try {
       const { InlineKeyboard } = require('grammy');
-      const kb = new InlineKeyboard().text('Verify this fixture', `verify_pick:${prediction.id}:${fixtureId}`);
-      await ctx.reply('If you want to validate this fixture on-chain, tap Verify below.', { reply_markup: kb });
+      const kb = new InlineKeyboard()
+        .text('What does Verify do?', `verify_explain:${prediction.id}:${fixtureId}`)
+        .row()
+        .text('Verify this fixture', `verify_pick:${prediction.id}:${fixtureId}`);
+      await ctx.reply('If you want to validate this fixture on-chain, tap Verify or learn more with What does Verify do?', { reply_markup: kb });
     } catch (e) {
       // ignore errors here
     }

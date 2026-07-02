@@ -9,6 +9,43 @@ const axios = require('axios');
 const { Pool } = require('pg');
 
 const { verifyFixtureProof } = require('./verify');
+const crypto = require('crypto');
+
+// Simple in-memory rate limiter: allows N requests per window per IP
+const RATE_LIMIT_WINDOW_MS = Number(process.env.VERIFY_RATE_WINDOW_MS || 60_000);
+const RATE_LIMIT_MAX = Number(process.env.VERIFY_RATE_MAX || 20);
+const ipCounters = new Map();
+
+function isRateLimited(ip) {
+  const now = Date.now();
+  let entry = ipCounters.get(ip);
+  if (!entry) {
+    entry = { count: 1, start: now };
+    ipCounters.set(ip, entry);
+    return false;
+  }
+  if (now - entry.start > RATE_LIMIT_WINDOW_MS) {
+    entry.count = 1;
+    entry.start = now;
+    return false;
+  }
+  entry.count += 1;
+  return entry.count > RATE_LIMIT_MAX;
+}
+
+// Simple retry helper
+async function withRetries(fn, retries = 2, delayMs = 500) {
+  let lastErr;
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (i < retries) await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
 
 const PORT = process.env.VERIFY_SERVICE_PORT || 3001;
 const TXLINE_BASE_URL = process.env.TXLINE_BASE_URL || 'https://txline.txodds.com';
@@ -47,11 +84,15 @@ const server = http.createServer((req, res) => {
     req.on('end', async () => {
       try {
         const payload = JSON.parse(body || '{}');
-        const txSig = await verifyFixtureProof(payload);
+        const ip = req.socket.remoteAddress || 'unknown';
+        if (isRateLimited(ip)) return jsonResponse(res, 429, { error: 'rate_limited' });
+
+        const txSig = await withRetries(() => verifyFixtureProof(payload), 3, 600);
         return jsonResponse(res, 200, { txSig });
       } catch (err) {
         console.error('[verify-service] /verify error:', err?.message || err);
-        return jsonResponse(res, 500, { error: err?.message || String(err) });
+        const status = err?.statusCode || 500;
+        return jsonResponse(res, status >= 400 && status < 600 ? status : 500, { error: err?.message || String(err) });
       }
     });
     return;
@@ -75,12 +116,16 @@ const server = http.createServer((req, res) => {
         const fixtureId = payload.fixtureId || payload.fixture_id || payload.id;
         if (!fixtureId) return jsonResponse(res, 400, { error: 'missing fixtureId' });
 
+        const ip = req.socket.remoteAddress || 'unknown';
+        if (isRateLimited(ip)) return jsonResponse(res, 429, { error: 'rate_limited' });
+
         const proofPayload = await fetchProofFromTxline(String(fixtureId));
-        const txSig = await verifyFixtureProof(proofPayload);
+        const txSig = await withRetries(() => verifyFixtureProof(proofPayload), 3, 600);
         return jsonResponse(res, 200, { txSig });
       } catch (err) {
         console.error('[verify-service] /verify-by-id error:', err?.message || err);
-        return jsonResponse(res, 500, { error: err?.message || String(err) });
+        const status = err?.statusCode || 500;
+        return jsonResponse(res, status >= 400 && status < 600 ? status : 500, { error: err?.message || String(err) });
       }
     });
     return;
