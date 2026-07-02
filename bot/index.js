@@ -6,6 +6,8 @@
 
 require('dotenv').config({ path: ['.env', 'bot/.env'] });
 const { Bot } = require('grammy');
+const express = require('express');
+const { webhookCallback } = require('grammy');
 
 const { registerPredictHandlers } = require('./handlers/predict');
 const { registerGroupHandlers } = require('./handlers/groups');
@@ -58,8 +60,25 @@ async function main() {
     broadcastQueue.init(bot);
     settlement.start();
 
-    console.log('[bot] starting long polling...');
-    await bot.start();
+    const mode = (process.env.TELEGRAM_MODE || 'polling').toLowerCase();
+    if (mode === 'webhook') {
+      const webhookUrl = process.env.TELEGRAM_WEBHOOK_URL;
+      if (!webhookUrl) throw new Error('TELEGRAM_WEBHOOK_URL required when TELEGRAM_MODE=webhook');
+
+      console.log('[bot] starting in webhook mode...');
+      await bot.api.setWebhook(webhookUrl, { drop_pending_updates: true });
+
+      const app = express();
+      app.use(express.json());
+      app.post('/telegram-webhook', webhookCallback(bot, 'express'));
+      app.get('/', (req, res) => res.send('ok'));
+
+      const port = process.env.PORT || 3000;
+      app.listen(port, () => console.log(`[bot] webhook listening on ${port}`));
+    } else {
+      console.log('[bot] starting long polling...');
+      await bot.start();
+    }
   } catch (err) {
     console.error('[bot] startup failed:', err.message);
     process.exit(1);
