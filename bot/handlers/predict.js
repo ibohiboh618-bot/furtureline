@@ -18,6 +18,59 @@ function registerPredictHandlers(bot) {
   bot.command('predict', handlePredictCommand);
   bot.command('mypicks', handleMyPicks);
 
+  // Verify a specific prediction (button shown in DM under My Picks)
+  bot.callbackQuery(/^verify_pick:(\d+):(\d+)$/, async (ctx) => {
+    if (!ctx.from) return;
+    const [, predictionIdStr, fixtureIdStr] = ctx.match;
+    const predictionId = Number(predictionIdStr);
+    const fixtureId = Number(fixtureIdStr);
+
+    // Ensure the callback is invoked by the owner of the prediction
+    const { rows } = await pool.query('select user_id from predictions where id = $1', [predictionId]);
+    if (rows.length === 0) {
+      await ctx.answerCallbackQuery({ text: 'Prediction not found.', show_alert: true });
+      return;
+    }
+    const ownerId = rows[0].user_id;
+    if (ownerId !== ctx.from.id) {
+      await ctx.answerCallbackQuery({ text: 'Only the owner can verify this prediction.', show_alert: true });
+      return;
+    }
+
+    await ctx.answerCallbackQuery();
+
+    // Call the verify service (if configured) and show result; otherwise instruct
+    // the user how to run verification.
+    const verifyServiceUrl = process.env.VERIFY_SERVICE_URL;
+    if (verifyServiceUrl) {
+      try {
+        const axios = require('axios');
+        const url = verifyServiceUrl.replace(/\/$/, '') + '/verify-by-id';
+        const headers = {};
+        if (process.env.VERIFY_SERVICE_TOKEN) headers['Authorization'] = `Bearer ${process.env.VERIFY_SERVICE_TOKEN}`;
+        const resp = await axios.post(url, { fixtureId }, { timeout: 20000, headers });
+        const txSig = resp.data?.txSig || resp.data?.tx_sig || resp.data?.sig;
+        if (txSig) {
+          const rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
+          const explorerUrl = rpcUrl.includes('devnet')
+            ? `https://explorer.solana.com/tx/${txSig}?cluster=devnet`
+            : `https://explorer.solana.com/tx/${txSig}`;
+
+          return await ctx.reply(
+            `On-chain validation submitted.\n` +
+            `Validation transaction: <code>${txSig}</code>\n` +
+            `View on explorer: ${explorerUrl}`,
+            { parse_mode: 'HTML' }
+          );
+        }
+      } catch (e) {
+        console.error('[predict.verify_pick] verify service error:', e?.message || e);
+      }
+    }
+
+    await ctx.reply('Verification service unavailable. You can run verification locally or ask an admin to deploy the verify-worker.');
+  });
+
   bot.callbackQuery(/^confirm_pick:(\d+):([A-Z0-9_]+):([A-Z]+)$/, async (ctx) => {
     if (!ctx.from) return;
     const [, fixtureIdStr, market, selection] = ctx.match;
@@ -56,6 +109,14 @@ function registerPredictHandlers(bot) {
 
 async function handlePredictCommand(ctx) {
   if (!ctx.from) return;
+  // If issued in a group or channel, route users to DM for private picks
+  if (ctx.chat && ctx.chat.type && ctx.chat.type !== 'private') {
+    const botUsername = process.env.TELEGRAM_BOT_USERNAME || 'FixtureLineBot';
+    const url = `https://t.me/${botUsername}?start=predict`;
+    const kb = new InlineKeyboard().url('Open in private chat', url);
+    return ctx.reply('I can help with private, personalized suggestions — please open a direct chat with me to continue.', { reply_markup: kb });
+  }
+
   const preferenceText = getPredictionInput(ctx);
 
   if (!preferenceText) {
@@ -130,12 +191,19 @@ async function handleMyPicks(ctx) {
     return ctx.reply('You do not have any active picks yet. Try /predict to get a fresh suggestion.');
   }
 
-  const lines = rows.map((p) => {
+  // In private chats include a per-prediction Verify button; avoid sending
+  // verify controls in groups to prevent public triggers.
+  for (const p of rows) {
     const statusIcon = { pending: '⏳', won: '✅', lost: '❌', void: '➖', cancelled: '🚫' }[p.status];
-    return `${statusIcon} ${p.home_team} vs ${p.away_team} — ${p.selection} (${p.points_staked} pts)`;
-  });
+    const text = `${statusIcon} ${p.home_team} vs ${p.away_team} — ${p.selection} (${p.points_staked} pts)`;
 
-  await ctx.reply(['Your recent picks:', ...lines].join('\n'));
+    if (ctx.chat && ctx.chat.type === 'private') {
+      const kb = new InlineKeyboard().text('Verify', `verify_pick:${p.id}:${p.fixture_id}`);
+      await ctx.reply(text, { reply_markup: kb });
+    } else {
+      await ctx.reply(text);
+    }
+  }
 }
 
 // --- data access -------------------------------------------------------
