@@ -1,4 +1,4 @@
-const { InlineKeyboard } = require('grammy');
+const { InlineKeyboard, Keyboard } = require('grammy');
 
 function buildMainMenu({ botUsername = 'FixtureLineBot' } = {}) {
   const keyboard = new InlineKeyboard()
@@ -17,6 +17,19 @@ function buildMainMenu({ botUsername = 'FixtureLineBot' } = {}) {
   return keyboard;
 }
 
+function buildFooterMenu() {
+  return new Keyboard()
+    .text('/predict')
+    .text('/markets')
+    .row()
+    .text('/mypicks')
+    .text('/verify')
+    .row()
+    .text('/leaderboard')
+    .text('/help')
+    .resized(true);
+}
+
 function buildStartCarouselContent({ title = 'Welcome to FixtureLine.', quickStart = null, commands = [], footer = 'Add me to a group or channel to get live goal alerts.' } = {}) {
   const lines = [
     title,
@@ -30,7 +43,7 @@ function buildStartCarouselContent({ title = 'Welcome to FixtureLine.', quickSta
 
   return {
     text: lines.join('\n'),
-    reply_markup: buildMainMenu(),
+    reply_markup: buildFooterMenu(),
   };
 }
 
@@ -73,6 +86,7 @@ function getAutoDeleteMs({ chatType, kind }) {
 
 module.exports = {
   buildMainMenu,
+  buildFooterMenu,
   buildStartCarouselContent,
   buildGroupOnboardingMessage,
   buildGroupAdminGuide,

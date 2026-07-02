@@ -7,7 +7,8 @@
 require('dotenv').config({ path: ['.env', 'bot/.env'] });
 const { Pool } = require('pg');
 const axios = require('axios');
-const { buildMainMenu } = require('../ui');
+const { InlineKeyboard } = require('grammy');
+const { buildFooterMenu } = require('../ui');
 const { formatInsightsText } = require('../market-insights');
 const { handlePredictCommand, handleMyPicks } = require('./predict');
 
@@ -19,11 +20,12 @@ function registerMiscHandlers(bot) {
   bot.command('verify', handleVerify);
   bot.command('markets', handleMarkets);
   bot.command('help', handleHelp);
+  bot.command('menu', handleMenu);
 
   bot.callbackQuery(/^menu:(predict|mypicks|leaderboard|verify|markets|help)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     const action = getMenuAction(ctx.match[1]);
-    if (action === 'predict') return handlePredictCommand(ctx);
+    if (action === 'predict') return handlePredictShortcut(ctx);
     if (action === 'mypicks') return handleMyPicks(ctx);
     if (action === 'leaderboard') return handleLeaderboard(ctx);
     if (action === 'verify') return handleVerify(ctx);
@@ -51,6 +53,17 @@ function getMenuAction(name) {
   }
 }
 
+async function handlePredictShortcut(ctx) {
+  if (ctx.chat && ctx.chat.type && ctx.chat.type !== 'private') {
+    const botUsername = process.env.TELEGRAM_BOT_USERNAME || 'FixtureLineBot';
+    const url = `https://t.me/${botUsername}?start=predict`;
+    const kb = new InlineKeyboard().url('Open in private chat', url);
+    return ctx.reply('I can help with private, personalized suggestions — please open a direct chat with me to continue.', { reply_markup: kb });
+  }
+
+  return handlePredictCommand(ctx);
+}
+
 async function handleLeaderboard(ctx) {
   const { rows } = await pool.query(
     `select telegram_username, display_name, points_balance
@@ -60,7 +73,7 @@ async function handleLeaderboard(ctx) {
   );
 
   if (rows.length === 0) {
-    return ctx.reply('No picks have been made yet. Be the first to start the scoreboard with /predict.');
+    return ctx.reply('No picks have been made yet. Be the first to start the scoreboard with /predict.', { reply_markup: buildFooterMenu() });
   }
 
   const lines = rows.map((u, i) => {
@@ -68,7 +81,7 @@ async function handleLeaderboard(ctx) {
     return `${i + 1}. ${name} -- ${u.points_balance} pts`;
   });
 
-  await ctx.reply(['Leaderboard', ...lines].join('\n'));
+  await ctx.reply(['Leaderboard', ...lines].join('\n'), { reply_markup: buildFooterMenu() });
 }
 
 async function handleHelp(ctx) {
@@ -84,7 +97,7 @@ async function handleHelp(ctx) {
     '• Verify — inspect a fixture’s on-chain proof',
   ].join('\n');
 
-  await ctx.reply(text, { reply_markup: buildMainMenu() });
+  await ctx.reply(text, { reply_markup: buildFooterMenu() });
 }
 
 async function handleMarkets(ctx) {
@@ -95,69 +108,83 @@ async function handleMarkets(ctx) {
     formatInsightsText(fixtures),
   ].join('\n');
 
-  await ctx.reply(text, { reply_markup: buildMainMenu() });
+  await ctx.reply(text, { reply_markup: buildFooterMenu() });
 }
 
 async function handleVerify(ctx) {
   const fixtureIdStr = getVerifyInput(ctx);
   if (!fixtureIdStr || Number.isNaN(Number(fixtureIdStr))) {
-    return ctx.reply('Usage: /verify <fixtureId>', { reply_markup: buildMainMenu() });
+    return ctx.reply('Usage: /verify <fixtureId>', { reply_markup: buildFooterMenu() });
   }
 
   await ctx.replyWithChatAction('typing');
 
+  const verifyServiceUrl = process.env.VERIFY_SERVICE_URL;
+  if (verifyServiceUrl) {
+    try {
+      const url = verifyServiceUrl.replace(/\/$/, '') + '/verify-by-id';
+      const headers = {};
+      if (process.env.VERIFY_SERVICE_TOKEN) headers['Authorization'] = `Bearer ${process.env.VERIFY_SERVICE_TOKEN}`;
+      const resp = await axios.post(url, { fixtureId: fixtureIdStr }, { timeout: 20000, headers });
+      const txSig = resp.data?.txSig || resp.data?.tx_sig || resp.data?.sig;
+      if (txSig) {
+        const rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
+        const explorerUrl = rpcUrl.includes('devnet')
+          ? `https://explorer.solana.com/tx/${txSig}?cluster=devnet`
+          : `https://explorer.solana.com/tx/${txSig}`;
+
+        return await ctx.reply(
+          `On-chain validation submitted.\n` +
+          `Validation transaction: <code>${txSig}</code>\n` +
+          `View on explorer: ${explorerUrl}`,
+          { parse_mode: 'HTML', reply_markup: buildFooterMenu() }
+        );
+      }
+
+      if (resp.status === 202 && resp.data?.jobId) {
+        const jobId = resp.data.jobId;
+        const jobUrl = verifyServiceUrl.replace(/\/$/, '') + `/job-status?id=${jobId}`;
+        return await ctx.reply(`Verification queued (job ${jobId}). Check status at ${jobUrl}`, {
+          reply_markup: buildFooterMenu(),
+        });
+      }
+    } catch (e) {
+      console.error('[verify] verify-service call failed:', e?.message || e);
+      // fall through to attempt local proof verification if possible
+    }
+  }
+
   try {
     const { jwt, apiToken } = await getActiveSession();
-    const verifyServiceUrl = process.env.VERIFY_SERVICE_URL;
-    if (verifyServiceUrl) {
-      try {
-        const url = verifyServiceUrl.replace(/\/$/, '') + '/verify-by-id';
-        const headers = {};
-        if (process.env.VERIFY_SERVICE_TOKEN) headers['Authorization'] = `Bearer ${process.env.VERIFY_SERVICE_TOKEN}`;
-        const resp = await axios.post(url, { fixtureId: fixtureIdStr }, { timeout: 20000, headers });
-        const txSig = resp.data?.txSig || resp.data?.tx_sig || resp.data?.sig;
-        if (txSig) {
-          const rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
-          const explorerUrl = rpcUrl.includes('devnet')
-            ? `https://explorer.solana.com/tx/${txSig}?cluster=devnet`
-            : `https://explorer.solana.com/tx/${txSig}`;
+    const proofResponse = await fetchMerkleProof(fixtureIdStr, jwt, apiToken);
+    return await ctx.reply(
+      `This fixture's data batch is anchored on Solana.\n` +
+      `Merkle root: <code>${proofResponse.merkleRoot}</code>\n` +
+      `Batch timestamp: ${proofResponse.batchTimestamp}\n\n` +
+      `To perform on-chain validation, either run the verification worker locally or deploy the verify service and set VERIFY_SERVICE_URL in the bot process.`,
+      { parse_mode: 'HTML', reply_markup: buildFooterMenu() }
+    );
+  } catch (e) {
+    console.error('[verify] fallback proof error:', e?.message || e);
 
-          return await ctx.reply(
-            `On-chain validation submitted.\n` +
-            `Validation transaction: <code>${txSig}</code>\n` +
-            `View on explorer: ${explorerUrl}`,
-            { parse_mode: 'HTML', reply_markup: buildMainMenu() }
-          );
-        }
-      } catch (e) {
-        console.error('[verify] verify-service call failed:', e?.message || e);
-        // fall through to fetch proof and show details below
-      }
-    }
-
-    // Either verify service wasn't configured or it failed — fetch proof and show details
-    try {
-      const proofResponse = await fetchMerkleProof(fixtureIdStr, jwt, apiToken);
-      await ctx.reply(
-        `This fixture's data batch is anchored on Solana.\n` +
-        `Merkle root: <code>${proofResponse.merkleRoot}</code>\n` +
-        `Batch timestamp: ${proofResponse.batchTimestamp}\n\n` +
-        `To perform on-chain validation, either run the verification worker locally or deploy the verify service and set VERIFY_SERVICE_URL in the bot process.`,
-        { parse_mode: 'HTML', reply_markup: buildMainMenu() }
+    if (e.message && e.message.includes('No active TxODDS session')) {
+      return ctx.reply(
+        "❌ Verification is not configured. Set VERIFY_SERVICE_URL in the bot environment or run the TxODDS session ingester so the local proof lookup can work.",
+        { reply_markup: buildFooterMenu() }
       );
-    } catch (e) {
-      console.error('[verify] fallback fetch proof failed:', e?.message || e);
-      await ctx.reply("❌ Couldn't fetch a proof for that fixture right now. Please ensure the fixture ID is correct or try again shortly.", { reply_markup: buildMainMenu() });
     }
-  } catch (err) {
-    console.error('[verify] error details:', err.message);
-    if (err.response) {
-      if (err.response.status === 404) {
-        return ctx.reply(`❌ No proof has been archived for fixture <code>${fixtureIdStr}</code> yet. It might not be finished, or its block hasn't been committed to Solana.`, { parse_mode: 'HTML', reply_markup: buildMainMenu() });
-      }
-      return ctx.reply(`❌ Failed to retrieve proof (API returned status ${err.response.status}). Please try again later.`, { reply_markup: buildMainMenu() });
+
+    if (e.response && e.response.status === 404) {
+      return ctx.reply(
+        `❌ No proof has been archived for fixture <code>${fixtureIdStr}</code> yet. It might not be finished, or its block hasn't been committed to Solana.`,
+        { parse_mode: 'HTML', reply_markup: buildFooterMenu() }
+      );
     }
-    await ctx.reply("❌ Couldn't fetch a proof for that fixture right now. Please ensure the fixture ID is correct or try again shortly.", { reply_markup: buildMainMenu() });
+
+    return ctx.reply(
+      "❌ Couldn't fetch a proof for that fixture right now. Please ensure the fixture ID is correct or try again shortly.",
+      { reply_markup: buildFooterMenu() }
+    );
   }
 }
 
@@ -246,6 +273,10 @@ async function fetchMerkleProof(fixtureId, jwt, apiToken) {
     batchTimestamp,
     proofPayload: data,
   };
+}
+
+async function handleMenu(ctx) {
+  await ctx.reply('Quick access commands:', { reply_markup: buildFooterMenu() });
 }
 
 module.exports = {

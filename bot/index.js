@@ -35,6 +35,7 @@ bot.command('start', async (ctx) => {
       '📌 /mypicks — review your active and recent picks',
       '🏆 /leaderboard — see the top players by points',
       '🔎 /verify <fixtureId> — validate a match with on-chain proof',
+      '📋 /menu — open the footer shortcut keyboard',
     ],
     footer: 'Add me to a group or channel for live goal alerts and match edge highlights.',
   });
