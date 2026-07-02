@@ -62,11 +62,33 @@ async function main() {
 
     const mode = (process.env.TELEGRAM_MODE || 'polling').toLowerCase();
     if (mode === 'webhook') {
-      const webhookUrl = process.env.TELEGRAM_WEBHOOK_URL;
+      let webhookUrl = process.env.TELEGRAM_WEBHOOK_URL;
       if (!webhookUrl) throw new Error('TELEGRAM_WEBHOOK_URL required when TELEGRAM_MODE=webhook');
+      webhookUrl = webhookUrl.trim();
+
+      // basic validation: must be an https URL
+      try {
+        const u = new URL(webhookUrl);
+        if (u.protocol !== 'https:') throw new Error('webhook URL must use https');
+      } catch (e) {
+        throw new Error(`Invalid TELEGRAM_WEBHOOK_URL: ${e.message}`);
+      }
 
       console.log('[bot] starting in webhook mode...');
-      await bot.api.setWebhook(webhookUrl, { drop_pending_updates: true });
+
+      try {
+        await bot.api.setWebhook(webhookUrl, { drop_pending_updates: true });
+      } catch (e) {
+        console.error('[bot] setWebhook failed:', e.message || e);
+        const fallback = (process.env.TELEGRAM_FALLBACK_POLLING || '').toLowerCase() === 'true';
+        if (fallback) {
+          console.warn('[bot] falling back to long polling because TELEGRAM_FALLBACK_POLLING=true');
+          console.log('[bot] starting long polling...');
+          await bot.start();
+          return;
+        }
+        throw e;
+      }
 
       const app = express();
       app.use(express.json());
