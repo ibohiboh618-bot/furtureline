@@ -19,10 +19,11 @@ function registerMiscHandlers(bot) {
   bot.command('leaderboard', handleLeaderboard);
   bot.command('verify', handleVerify);
   bot.command('markets', handleMarkets);
+  bot.command('odds', handleOdds);
   bot.command('help', handleHelp);
   bot.command('menu', handleMenu);
 
-  bot.callbackQuery(/^menu:(predict|mypicks|leaderboard|verify|markets|help)$/, async (ctx) => {
+  bot.callbackQuery(/^menu:(predict|mypicks|leaderboard|verify|markets|help|odds)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     const action = getMenuAction(ctx.match[1]);
     if (action === 'predict') return handlePredictShortcut(ctx);
@@ -30,6 +31,7 @@ function registerMiscHandlers(bot) {
     if (action === 'leaderboard') return handleLeaderboard(ctx);
     if (action === 'verify') return handleVerify(ctx);
     if (action === 'markets') return handleMarkets(ctx);
+    if (action === 'odds') return handleOdds(ctx);
     return handleHelp(ctx);
   });
 }
@@ -46,10 +48,69 @@ function getMenuAction(name) {
       return 'verify';
     case 'markets':
       return 'markets';
+    case 'odds':
+      return 'odds';
     case 'help':
       return 'help';
     default:
       return null;
+  }
+}
+
+async function handleOdds(ctx) {
+  const parts = (ctx.message?.text || '').trim().split(/\s+/);
+  const fixtureId = parts.length > 1 ? parts[1] : null;
+
+  if (!fixtureId) {
+    // list upcoming fixtures with a short id so users can call /odds <id>
+    const { rows } = await pool.query(
+      `select id, home_team, away_team, kickoff_at
+       from fixtures
+       where status = 'scheduled' and kickoff_at > now()
+         and kickoff_at < now() + interval '3 days'
+       order by kickoff_at asc
+       limit 6`
+    );
+
+    if (rows.length === 0) return ctx.reply('No upcoming fixtures with odds available.', { reply_markup: buildFooterMenu() });
+
+    const lines = rows.map(r => `${r.id} — ${r.home_team} vs ${r.away_team} (kickoff ${new Date(r.kickoff_at).toISOString()})`);
+    lines.unshift('Upcoming fixtures (use /odds <fixtureId> to view markets):', '');
+
+    return ctx.reply(lines.join('\n'), { reply_markup: buildFooterMenu() });
+  }
+
+  // show latest market snapshots for the fixture
+  try {
+    const { rows } = await pool.query(
+      `select distinct on (market, selection) market, selection, implied_prob
+       from odds_snapshots
+       where fixture_id = $1
+       order by market, selection, captured_at desc`,
+      [fixtureId]
+    );
+
+    if (rows.length === 0) {
+      return ctx.reply(`No odds found for fixture ${fixtureId}.`, { reply_markup: buildFooterMenu() });
+    }
+
+    const byMarket = new Map();
+    for (const r of rows) {
+      if (!byMarket.has(r.market)) byMarket.set(r.market, []);
+      byMarket.get(r.market).push({ selection: r.selection, impliedProb: Number(r.implied_prob) });
+    }
+
+    const partsOut = [`Markets for fixture ${fixtureId}:`, ''];
+    for (const [market, entries] of byMarket.entries()) {
+      partsOut.push(`-- ${market}`);
+      for (const e of entries) partsOut.push(`  ${e.selection}: ${(e.impliedProb * 100).toFixed(2)}%`);
+      partsOut.push('');
+    }
+
+    return ctx.reply(partsOut.join('\n'), { reply_markup: buildFooterMenu() });
+  } catch (err) {
+    console.error('[odds] query failed:', err.message);
+    return ctx.reply('Error fetching odds. Try again later.', { reply_markup: buildFooterMenu() });
   }
 }
 
@@ -286,4 +347,5 @@ module.exports = {
   handleHelp,
   handleVerify,
   handleMarkets,
+  handleOdds,
 };

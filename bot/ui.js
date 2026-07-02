@@ -9,6 +9,8 @@ function buildMainMenu({ botUsername = 'FixtureLineBot' } = {}) {
     .text('Verify', 'menu:verify')
     .row()
     .text('Leaderboard', 'menu:leaderboard')
+    .text('Live odds', 'menu:odds')
+    .row()
     .text('How it works', 'menu:help')
     .row()
     .url('Add to group', `https://t.me/${botUsername}?startgroup=fixtureline`)
@@ -19,14 +21,16 @@ function buildMainMenu({ botUsername = 'FixtureLineBot' } = {}) {
 
 function buildFooterMenu() {
   return new Keyboard()
-    .text('/predict')
-    .text('/markets')
+    .text('Predict')
+    .text('Markets')
     .row()
-    .text('/mypicks')
-    .text('/verify')
+    .text('My Picks')
+    .text('Verify')
     .row()
-    .text('/leaderboard')
-    .text('/help')
+    .text('Leaderboard')
+    .text('Live odds')
+    .row()
+    .text('Help')
     .resized(true);
 }
 
@@ -55,9 +59,10 @@ function buildGroupOnboardingMessage({ chatType = 'group' } = {}) {
     '',
     'Admins can choose the alert intensity with /alertlevel.',
     'Options: goals_only, goals_and_cards, or all_events.',
+    'Use /odds to see live market snapshots and the latest betting lines for matches.',
     '',
     isChannel
-      ? 'Use it to broadcast match moments, market flashes, and updates to your audience.'
+      ? 'Use it to broadcast match moments, market flashes, and odds updates to your audience.'
       : 'Tip: add the bot to a channel too for the same live-match flow.',
   ];
 
@@ -67,7 +72,9 @@ function buildGroupOnboardingMessage({ chatType = 'group' } = {}) {
 function buildGroupAdminGuide() {
   const keyboard = new InlineKeyboard()
     .text('Alert levels', 'group:alertlevel')
-    .text('How it works', 'menu:help');
+    .text('Live odds', 'group:odds')
+    .row()
+    .text('How it works', 'group:help');
 
   return keyboard;
 }
