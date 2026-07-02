@@ -1,11 +1,12 @@
-FROM node:18-alpine
+FROM node:20-slim
 WORKDIR /usr/src/app
 
-# Install apk deps for building native modules if needed
-RUN apk add --no-cache build-base python3
+# Install build tools for native modules and Python for optional scripts.
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential python3 python3-dev ca-certificates && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json* ./
-RUN npm ci --only=production
+# Use npm install to be tolerant when package-lock.json is absent in local dev
+RUN npm install --production
 
 COPY . ./
 

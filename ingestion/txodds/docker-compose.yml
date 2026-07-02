@@ -1,0 +1,56 @@
+services:
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_PASSWORD: example
+      POSTGRES_USER: example
+      POSTGRES_DB: fixtureline
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U example -d fixtureline"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  verify-service:
+    build: .
+    environment:
+      DATABASE_URL: postgres://example:example@postgres:5432/fixtureline
+      REDIS_URL: redis://redis:6379
+      VERIFY_SERVICE_TOKEN: changeme
+      ADMIN_TOKEN: changeme-admin
+    ports:
+      - "3002:3001"
+    depends_on:
+      - redis
+      - postgres
+
+  verify-worker:
+    build: .
+    environment:
+      DATABASE_URL: postgres://example:example@postgres:5432/fixtureline
+      REDIS_URL: redis://redis:6379
+      TXLINE_BASE_URL: https://txline.txodds.com
+    command: sh -c "npm run start:verify-worker"
+    depends_on:
+      - redis
+      - postgres
+
+volumes:
+  postgres_data:
+  redis_data:

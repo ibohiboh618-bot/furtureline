@@ -24,40 +24,10 @@ if (process.env.REDIS_URL) {
   redisClient = new Redis(process.env.REDIS_URL);
   // separate ioredis instance for bullmq
   bullConnection = new Redis(process.env.REDIS_URL);
-  const { Queue, Worker } = require('bullmq');
+  const { Queue } = require('bullmq');
   verifyQueue = new Queue('verify', { connection: bullConnection });
-
-  // Start a Bull worker to process verification jobs
-  const worker = new Worker('verify', async (job) => {
-    const fixtureId = job.data.fixtureId;
-    try {
-      // persist a job row in Postgres for visibility
-      await pool.query(
-        `insert into verify_jobs (id, fixture_id, status, attempts, created_at, updated_at)
-         values ($1, $2, 'pending', 0, now(), now())
-         on conflict (id) do nothing`,
-        [job.id, String(fixtureId)]
-      );
-
-      const proofPayload = await fetchProofFromTxline(String(fixtureId));
-      const txSig = await withRetries(() => verifyFixtureProof(proofPayload), 3, 600);
-
-      await pool.query("update verify_jobs set status='done', result = $2, updated_at = now() where id = $1", [job.id, JSON.stringify({ txSig })]);
-      console.log('[verify-worker] job', job.id, 'done', txSig);
-      return { txSig };
-    } catch (err) {
-      // increment attempts and mark failed if too many
-      const attempts = (job.attempts || 0) + 1;
-      const nextStatus = attempts >= 3 ? 'failed' : 'pending';
-      await pool.query("update verify_jobs set attempts = $2, status = $3, result = $4, updated_at = now() where id = $1", [job.id, attempts, nextStatus, JSON.stringify({ error: err.message })]);
-      console.error('[verify-worker] job', job.id, 'failed', err?.message || err);
-      throw err;
-    }
-  }, { connection: bullConnection });
-
-  worker.on('failed', (job, err) => {
-    console.error('[bull-worker] job failed', job.id, err?.message || err);
-  });
+  // Note: the Bull `Worker` has been moved to `worker.js` so the queue
+  // processing can run in a separate horizontally-scalable process.
 }
 
 // Rate limiter: prefer Redis when configured
@@ -105,6 +75,26 @@ async function withRetries(fn, retries = 2, delayMs = 500) {
 const PORT = process.env.VERIFY_SERVICE_PORT || 3001;
 const TXLINE_BASE_URL = process.env.TXLINE_BASE_URL || 'https://txline.txodds.com';
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const MAX_DB_RETRIES = Number(process.env.DB_CONNECT_RETRIES || 12);
+const DB_RETRY_DELAY_MS = Number(process.env.DB_CONNECT_RETRY_DELAY_MS || 1000);
+
+async function waitForDatabase() {
+  let attempt = 0;
+  while (true) {
+    try {
+      const client = await pool.connect();
+      client.release();
+      return;
+    } catch (err) {
+      attempt += 1;
+      if (attempt >= MAX_DB_RETRIES) {
+        throw err;
+      }
+      console.warn(`[verify-service] waiting for database (${attempt}/${MAX_DB_RETRIES})`, err.message);
+      await new Promise((resolve) => setTimeout(resolve, DB_RETRY_DELAY_MS));
+    }
+  }
+}
 
 function jsonResponse(res, status, obj) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -128,7 +118,7 @@ async function fetchProofFromTxline(fixtureId) {
   return data;
 }
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/health') {
     return jsonResponse(res, 200, { ok: true });
   }
@@ -259,6 +249,7 @@ server.listen(PORT, () => {
   // Initialize DB-backed job table and start background worker
   (async function setupQueue() {
     try {
+      await waitForDatabase();
       await pool.query(`
         create table if not exists verify_jobs (
           id serial primary key,
