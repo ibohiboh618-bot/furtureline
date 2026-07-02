@@ -62,15 +62,31 @@ async function main() {
 
     const mode = (process.env.TELEGRAM_MODE || 'polling').toLowerCase();
     if (mode === 'webhook') {
-      let webhookUrl = process.env.TELEGRAM_WEBHOOK_URL;
-      if (!webhookUrl) throw new Error('TELEGRAM_WEBHOOK_URL required when TELEGRAM_MODE=webhook');
-      webhookUrl = webhookUrl.trim();
+      const strict = (process.env.TELEGRAM_STRICT_WEBHOOK || '').toLowerCase() === 'true';
+      let webhookUrl = process.env.TELEGRAM_WEBHOOK_URL?.trim();
+
+      if (!webhookUrl) {
+        if (!strict) {
+          console.warn('[bot] TELEGRAM_WEBHOOK_URL is missing; falling back to long polling');
+          console.log('[bot] starting long polling...');
+          await bot.start();
+          return;
+        }
+        throw new Error('TELEGRAM_WEBHOOK_URL required when TELEGRAM_MODE=webhook');
+      }
 
       // basic validation: must be an https URL
       try {
         const u = new URL(webhookUrl);
         if (u.protocol !== 'https:') throw new Error('webhook URL must use https');
       } catch (e) {
+        if (!strict) {
+          console.warn('[bot] Invalid TELEGRAM_WEBHOOK_URL:', e.message);
+          console.warn('[bot] falling back to long polling (TELEGRAM_STRICT_WEBHOOK is not set)');
+          console.log('[bot] starting long polling...');
+          await bot.start();
+          return;
+        }
         throw new Error(`Invalid TELEGRAM_WEBHOOK_URL: ${e.message}`);
       }
 
@@ -80,9 +96,7 @@ async function main() {
         await bot.api.setWebhook(webhookUrl, { drop_pending_updates: true });
       } catch (e) {
         console.error('[bot] setWebhook failed:', e.message || e);
-        const strict = (process.env.TELEGRAM_STRICT_WEBHOOK || '').toLowerCase() === 'true';
-        const fallback = !strict; // by default we fall back to polling to avoid crashes
-        if (fallback) {
+        if (!strict) {
           console.warn('[bot] falling back to long polling (TELEGRAM_STRICT_WEBHOOK is not set)');
           console.warn('[bot] NOTE: consider fixing TELEGRAM_WEBHOOK_URL or set TELEGRAM_STRICT_WEBHOOK=true to fail fast');
           console.log('[bot] starting long polling...');
