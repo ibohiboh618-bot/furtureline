@@ -82,6 +82,7 @@ create table users (
   points_balance       integer not null default 1000,  -- starting points, free
   risk_preference     text check (risk_preference in ('low', 'medium', 'high')),
   favorite_teams      text[] default '{}',
+  favorite_alert_level text check (favorite_alert_level in ('goals_only', 'goals_and_cards', 'all_events')) not null default 'goals_only',
   created_at          timestamptz not null default now(),
   last_active_at      timestamptz not null default now()
 );

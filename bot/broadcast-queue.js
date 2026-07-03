@@ -35,7 +35,6 @@ async function pollForNewEvents() {
        from score_events se
        join fixtures f on f.id = se.fixture_id
        where se.broadcast_at is null
-         and se.event_type in ('goal', 'red_card', 'half_time', 'full_time')
        order by se.occurred_at asc
        limit 50`
     );
@@ -45,8 +44,14 @@ async function pollForNewEvents() {
     for (const event of events) {
       const targets = await getTargetsFor(event);
       for (const target of targets) {
-        queue.push({ event, target });
+        queue.push({ event, target, type: 'broadcast' });
       }
+
+      const favorites = await getFavoriteTargetsFor(event);
+      for (const target of favorites) {
+        queue.push({ event, target, type: 'favorite' });
+      }
+
       await pool.query(`update score_events set broadcast_at = now() where id = $1`, [event.id]);
     }
 
@@ -75,6 +80,60 @@ async function getTargetsFor(event) {
     console.error('[broadcast-queue] target lookup failed:', err.message);
     return [];
   }
+}
+
+async function getFavoriteTargetsFor(event) {
+  try {
+    const { rows } = await pool.query(
+      `select telegram_user_id as chat_id, favorite_alert_level, favorite_teams
+       from users
+       where telegram_user_id is not null
+         and ($1 = any(favorite_teams) or $2 = any(favorite_teams))`,
+      [event.home_team, event.away_team]
+    );
+
+    const targets = [];
+    const seen = new Set();
+
+    for (const row of rows) {
+      const level = row.favorite_alert_level || 'goals_only';
+      if (!shouldNotifyForFavorite(level, event.event_type)) continue;
+
+      const favorites = Array.isArray(row.favorite_teams) ? row.favorite_teams : [];
+      const followsHome = favorites.includes(event.home_team);
+      const followsAway = favorites.includes(event.away_team);
+      const isMatchLevel = !event.team;
+
+      if (event.team === 'home' && !followsHome) continue;
+      if (event.team === 'away' && !followsAway) continue;
+      if (isMatchLevel && !followsHome && !followsAway) continue;
+
+      const chatId = Number(row.chat_id);
+      if (!chatId || seen.has(chatId)) continue;
+      seen.add(chatId);
+
+      targets.push({
+        chat_id: chatId,
+        home_team: event.home_team,
+        away_team: event.away_team,
+        event_type: event.event_type,
+        team: event.team,
+      });
+    }
+
+    return targets;
+  } catch (err) {
+    console.error('[broadcast-queue] favorite target lookup failed:', err.message);
+    return [];
+  }
+}
+
+function shouldNotifyForFavorite(level, eventType) {
+  if (level === 'all_events') return true;
+  if (level === 'goals_and_cards') {
+    return ['goal', 'red_card'].includes(eventType);
+  }
+  return eventType === 'goal';
 }
 
 async function drainQueue() {
@@ -106,30 +165,35 @@ async function drainQueue() {
   draining = false;
 }
 
-async function sendBroadcast({ event, target }) {
-  const text = formatEventText(event);
+async function sendBroadcast({ event, target, type }) {
+  const text = formatEventText(event, type);
   await bot.api.sendMessage(target.chat_id, text, { parse_mode: 'HTML' });
 }
 
-function formatEventText(event) {
+function formatEventText(event, type = 'broadcast') {
   const score = `${event.home_score ?? 0}-${event.away_score ?? 0}`;
   const matchLabel = `${event.home_team} vs ${event.away_team}`;
+  const prefix = type === 'favorite' ? '⭐ Favorite team update:' : '';
 
   switch (event.event_type) {
     case 'goal': {
       const scorer = event.team === 'home' ? event.home_team : event.away_team;
-      return `⚽ <b>Goal!</b> ${scorer} (${event.minute}') — ${matchLabel} now ${score}`;
+      return `${prefix} ⚽ <b>Goal!</b> ${scorer} (${event.minute}') — ${matchLabel} now ${score}`;
     }
     case 'red_card': {
       const side = event.team === 'home' ? event.home_team : event.away_team;
-      return `🟥 Red card, ${side} (${event.minute}') — ${matchLabel}`;
+      return `${prefix} 🟥 Red card, ${side} (${event.minute}') — ${matchLabel}`;
+    }
+    case 'yellow_card': {
+      const side = event.team === 'home' ? event.home_team : event.away_team;
+      return `${prefix} 🟨 Yellow card, ${side} (${event.minute}') — ${matchLabel}`;
     }
     case 'half_time':
-      return `⏱ Half time — ${matchLabel} ${score}`;
+      return `${prefix} ⏱ Half time — ${matchLabel} ${score}`;
     case 'full_time':
-      return `🏁 Full time — ${matchLabel} ${score}`;
+      return `${prefix} 🏁 Full time — ${matchLabel} ${score}`;
     default:
-      return `${matchLabel}: ${event.description ?? event.event_type}`;
+      return `${prefix} ${matchLabel}: ${event.description ?? event.event_type}`;
   }
 }
 

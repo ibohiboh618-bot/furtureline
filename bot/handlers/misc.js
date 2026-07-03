@@ -18,8 +18,16 @@ const TXLINE_BASE_URL = process.env.TXLINE_BASE_URL || 'https://txline.txodds.co
 function registerMiscHandlers(bot) {
   bot.command('leaderboard', handleLeaderboard);
   bot.command('verify', handleVerify);
+  bot.command('verify-status', handleVerifyStatus);
+  bot.command('diagnose', handleDiagnose);
+  bot.command('about', handleAbout);
   bot.command('markets', handleMarkets);
   bot.command('odds', handleOdds);
+  bot.command('follow', handleFollow);
+  bot.command('unfollow', handleUnfollow);
+  bot.command('favorites', handleFavorites);
+  bot.command('favorite-alerts', handleFavoriteAlerts);
+  bot.command('favorite-alert-level', handleFavoriteAlerts);
   bot.command('help', handleHelp);
   bot.command('menu', handleMenu);
 
@@ -27,11 +35,14 @@ function registerMiscHandlers(bot) {
   bot.hears(/^Markets$/i, handleMarkets);
   bot.hears(/^My Picks$/i, handleMyPicks);
   bot.hears(/^Verify$/i, handleVerify);
+  bot.hears(/^Verify status$/i, handleVerifyStatus);
+  bot.hears(/^Diagnostics$/i, handleDiagnose);
+  bot.hears(/^About$/i, handleAbout);
   bot.hears(/^Leaderboard$/i, handleLeaderboard);
   bot.hears(/^Live odds$/i, handleOdds);
   bot.hears(/^Help$/i, handleHelp);
 
-  bot.callbackQuery(/^menu:(predict|mypicks|leaderboard|verify|markets|help|odds)$/, async (ctx) => {
+  bot.callbackQuery(/^menu:(predict|mypicks|leaderboard|verify|markets|help|odds|about|diagnose)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     const action = getMenuAction(ctx.match[1]);
     if (action === 'predict') return handlePredictShortcut(ctx);
@@ -39,8 +50,18 @@ function registerMiscHandlers(bot) {
     if (action === 'leaderboard') return handleLeaderboard(ctx);
     if (action === 'verify') return handleVerify(ctx);
     if (action === 'markets') return handleMarkets(ctx);
-    if (action === 'odds') return handleOdds(ctx);
+    if (action === 'odds') return handleOdds(ctx, null);
+    if (action === 'about') return handleAbout(ctx);
+    if (action === 'diagnose') return handleDiagnose(ctx);
     return handleHelp(ctx);
+  });
+
+  bot.callbackQuery(/^group:(alertlevel|odds|help)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const action = ctx.match[1];
+    if (action === 'odds') return handleOdds(ctx, null);
+    if (action === 'help') return handleHelp(ctx);
+    return ctx.reply('Admins can set alert level with /alertlevel goals_only | goals_and_cards | all_events.', { reply_markup: buildFooterMenu() });
   });
 
   bot.callbackQuery(/^odds:(\d+)$/, async (ctx) => {
@@ -65,6 +86,10 @@ function getMenuAction(name) {
       return 'odds';
     case 'help':
       return 'help';
+    case 'about':
+      return 'about';
+    case 'diagnose':
+      return 'diagnose';
     default:
       return null;
   }
@@ -198,6 +223,175 @@ async function handleMarkets(ctx) {
   ].join('\n');
 
   await ctx.reply(text, { reply_markup: buildFooterMenu() });
+}
+
+async function handleAbout(ctx) {
+  const text = [
+    'FixtureLine is a football intelligence companion that brings live odds, picks, and verification into Telegram.',
+    '',
+    'What it does:',
+    '• Shows upcoming fixtures and current market odds',
+    '• Suggests AI-assisted picks when you ask for them',
+    '• Lets you verify match data with on-chain proof when available',
+    '',
+    'Try these commands:',
+    '• /predict — get a pick recommendation',
+    '• /odds <fixtureId> — view match odds',
+    '• /verify <fixtureId> — request proof verification',
+    '• /verify-status <fixtureId> — check the bot’s verification setup for that match',
+    '• /follow <team> — save a team for future alerts',
+    '• /favorites — list your saved teams',
+    '• /diagnose — check verify service and local ingestion status',
+  ].join('\n');
+
+  await ctx.reply(text, { reply_markup: buildFooterMenu() });
+}
+
+async function handleVerifyStatus(ctx) {
+  const fixtureIdStr = getVerifyInput(ctx);
+  if (!fixtureIdStr || Number.isNaN(Number(fixtureIdStr))) {
+    return ctx.reply('Usage: /verify-status <fixtureId>. You can copy a fixture ID from /odds.', { reply_markup: buildFooterMenu() });
+  }
+
+  const parts = [];
+  const verifyServiceUrl = process.env.VERIFY_SERVICE_URL;
+  if (verifyServiceUrl) {
+    parts.push('Verify service is configured.');
+    const health = await checkVerifyServiceHealth(verifyServiceUrl);
+    parts.push(`• Service health: ${health.ok ? 'ok' : `unreachable (${health.error})`}`);
+    parts.push(`• VERIFY_SERVICE_TOKEN: ${process.env.VERIFY_SERVICE_TOKEN ? 'present' : 'missing'}`);
+  } else {
+    parts.push('Verify service is not configured. Set VERIFY_SERVICE_URL and optionally VERIFY_SERVICE_TOKEN.');
+  }
+
+  try {
+    const { jwt, apiToken } = await getActiveSession();
+    parts.push('Local TxODDS session: active.');
+    try {
+      const proof = await fetchMerkleProof(fixtureIdStr, jwt, apiToken);
+      parts.push(`• Proof lookup: available (root ${proof.merkleRoot.slice(0, 12)}...)`);
+    } catch (err) {
+      if (err.response && err.response.status === 404) {
+        parts.push('• Proof lookup: no proof archived yet for that fixture.');
+      } else {
+        parts.push(`• Proof lookup: unavailable (${err.message})`);
+      }
+    }
+  } catch (err) {
+    parts.push(`Local TxODDS session: unavailable (${err.message}).`);
+  }
+
+  return ctx.reply(parts.join('\n'), { reply_markup: buildFooterMenu() });
+}
+
+async function handleDiagnose(ctx) {
+  const parts = [];
+  parts.push('Diagnostics summary:');
+
+  if (process.env.VERIFY_SERVICE_URL) {
+    const health = await checkVerifyServiceHealth(process.env.VERIFY_SERVICE_URL);
+    parts.push(`• Verify service: configured (${health.ok ? 'reachable' : `unreachable: ${health.error}`})`);
+    parts.push(`• VERIFY_SERVICE_TOKEN: ${process.env.VERIFY_SERVICE_TOKEN ? 'present' : 'missing'}`);
+  } else {
+    parts.push('• Verify service: not configured');
+  }
+
+  try {
+    await getActiveSession();
+    parts.push('• Local TxODDS session: active');
+  } catch (err) {
+    parts.push(`• Local TxODDS session: unavailable (${err.message})`);
+  }
+
+  try {
+    const { rows } = await pool.query('select count(*)::int as count from fixtures');
+    parts.push(`• Fixture data: ${rows[0].count} fixtures in the database`);
+  } catch (err) {
+    parts.push(`• Fixture data: unavailable (${err.message})`);
+  }
+
+  const user = await getOrCreateUser(ctx.from);
+  parts.push(`• Favorite alert level: ${user.favorite_alert_level || 'goals_only'}`);
+
+  return ctx.reply(parts.join('\n'), { reply_markup: buildFooterMenu() });
+}
+
+async function handleFollow(ctx) {
+  const team = getCommandArg(ctx);
+  if (!team) {
+    return ctx.reply('Usage: /follow <team>. Example: /follow Brazil', { reply_markup: buildFooterMenu() });
+  }
+
+  const user = await getOrCreateUser(ctx.from);
+  const favorites = user.favorite_teams || [];
+  if (favorites.includes(team)) {
+    return ctx.reply(`You are already following ${team}.`, { reply_markup: buildFooterMenu() });
+  }
+
+  const updated = [...favorites, team];
+  await pool.query('update users set favorite_teams = $1 where id = $2', [updated, user.id]);
+  return ctx.reply(`Added ${team} to your followed teams. Use /favorites to see them.`, { reply_markup: buildFooterMenu() });
+}
+
+async function handleUnfollow(ctx) {
+  const team = getCommandArg(ctx);
+  if (!team) {
+    return ctx.reply('Usage: /unfollow <team>. Example: /unfollow Brazil', { reply_markup: buildFooterMenu() });
+  }
+
+  const user = await getOrCreateUser(ctx.from);
+  const favorites = user.favorite_teams || [];
+  const updated = favorites.filter((t) => t !== team);
+  if (updated.length === favorites.length) {
+    return ctx.reply(`You were not following ${team}.`, { reply_markup: buildFooterMenu() });
+  }
+
+  await pool.query('update users set favorite_teams = $1 where id = $2', [updated, user.id]);
+  return ctx.reply(`Removed ${team} from your followed teams.`, { reply_markup: buildFooterMenu() });
+}
+
+async function handleFavorites(ctx) {
+  const user = await getOrCreateUser(ctx.from);
+  const favorites = user.favorite_teams || [];
+  if (favorites.length === 0) {
+    return ctx.reply('You are not following any teams yet. Use /follow <team> to save one.', { reply_markup: buildFooterMenu() });
+  }
+  return ctx.reply(
+    `Your followed teams:\n• ${favorites.join('\n• ')}\n\nFavorite alert level: ${user.favorite_alert_level || 'goals_only'}`,
+    { reply_markup: buildFooterMenu() }
+  );
+}
+
+async function handleFavoriteAlerts(ctx) {
+  const level = getCommandArg(ctx)?.toLowerCase();
+  const valid = ['goals_only', 'goals_and_cards', 'all_events'];
+  if (!level || !valid.includes(level)) {
+    return ctx.reply(
+      'Usage: /favorite-alerts <goals_only|goals_and_cards|all_events>\n' +
+      'Example: /favorite-alerts goals_and_cards',
+      { reply_markup: buildFooterMenu() }
+    );
+  }
+
+  const user = await getOrCreateUser(ctx.from);
+  await pool.query('update users set favorite_alert_level = $1 where id = $2', [level, user.id]);
+  return ctx.reply(`Favorite team alerts set to ${level}.`, { reply_markup: buildFooterMenu() });
+}
+
+function getCommandArg(ctx) {
+  if (!ctx?.message?.text) return null;
+  const parts = ctx.message.text.trim().split(/\s+/);
+  return parts.slice(1).join(' ').trim() || null;
+}
+
+async function checkVerifyServiceHealth(url) {
+  try {
+    const healthUrl = new URL('/health', url.replace(/\/$/, '')).toString();
+    const resp = await axios.get(healthUrl, { timeout: 5000 });
+    return { ok: resp.status === 200, error: resp.status === 200 ? null : `status ${resp.status}` };
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  }
 }
 
 async function handleVerify(ctx) {

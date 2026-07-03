@@ -20,10 +20,10 @@ function registerPredictHandlers(bot) {
   bot.command('mypicks', handleMyPicks);
 
   // Verify a specific prediction (button shown in DM under My Picks)
-  bot.callbackQuery(/^verify_pick:(\d+):(\d+)$/, async (ctx) => {
+  bot.callbackQuery(/^verify_pick:([^:]+):(\d+)$/, async (ctx) => {
     if (!ctx.from) return;
     const [, predictionIdStr, fixtureIdStr] = ctx.match;
-    const predictionId = Number(predictionIdStr);
+    const predictionId = predictionIdStr;
     const fixtureId = Number(fixtureIdStr);
 
     // Ensure the callback is invoked by the owner of the prediction
@@ -99,7 +99,7 @@ function registerPredictHandlers(bot) {
   });
 
   // Explain what Verify does (short helper) and offer to run verification
-  bot.callbackQuery(/^verify_explain:(\d+):(\d+)$/, async (ctx) => {
+  bot.callbackQuery(/^verify_explain:([^:]+):(\d+)$/, async (ctx) => {
     if (!ctx.from) return;
     const [, predictionIdStr, fixtureIdStr] = ctx.match;
     await ctx.answerCallbackQuery();

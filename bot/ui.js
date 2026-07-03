@@ -12,6 +12,9 @@ function buildMainMenu({ botUsername = 'FixtureLineBot' } = {}) {
     .text('Live odds', 'menu:odds')
     .row()
     .text('How it works', 'menu:help')
+    .text('About', 'menu:about')
+    .row()
+    .text('Diagnostics', 'menu:diagnose')
     .row()
     .url('Add to group', `https://t.me/${botUsername}?startgroup=fixtureline`)
     .url('Add to channel', `https://t.me/${botUsername}?startchannel=fixtureline`);
@@ -30,7 +33,8 @@ function buildFooterMenu() {
     .text('Leaderboard', 'menu:leaderboard')
     .text('Live odds', 'menu:odds')
     .row()
-    .text('Help', 'menu:help');
+    .text('About', 'menu:about')
+    .text('Diagnostics', 'menu:diagnose');
 }
 
 function buildStartCarouselContent({ title = 'Welcome to FixtureLine.', quickStart = null, commands = [], footer = 'Add me to a group or channel to get live goal alerts.' } = {}) {
@@ -42,7 +46,7 @@ function buildStartCarouselContent({ title = 'Welcome to FixtureLine.', quickSta
     lines.push('', quickStart);
   }
 
-  lines.push('', ...commands, '', footer, '', 'Tap a button below to start, or type /help for details.');
+  lines.push('', ...commands, '', footer, '', 'Use the buttons below to get started, or type /help for a quick guide.');
 
   return {
     text: lines.join('\n'),
@@ -56,13 +60,15 @@ function buildGroupOnboardingMessage({ chatType = 'group' } = {}) {
   const body = [
     headline,
     '',
-    'Use /odds to list upcoming fixtures and copy the fixture ID for /verify or /odds.',
-    'Admins can change alert intensity with /alertlevel: goals_only, goals_and_cards, all_events.',
-    'Press Live odds to see the next matches with market pricing and pick context.',
+    'FixtureLine sends match alerts, live betting odds, and verification guidance into this chat.',
+    'Admins can set alert intensity with /alertlevel goals_only | goals_and_cards | all_events.',
+    'Any member can use /odds to list upcoming fixtures and copy a fixture ID.',
+    'Use /follow <team> to save a favorite team for future alerts.',
+    'Then use /verify <fixtureId> to check match data with on-chain proof when available.',
     '',
     isChannel
-      ? 'Use me in a channel to broadcast alerts and live-match updates to your audience.'
-      : 'Add the bot to a channel too for a cleaner live match feed.',
+      ? 'This channel can broadcast alerts and live-match updates cleanly to your audience.'
+      : 'Use /help anytime for a short guide to all commands and buttons.',
   ];
 
   return { text: body.join('\n') };

@@ -29,20 +29,21 @@ assertEnv('DATABASE_URL');
 const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN);
 
 bot.command('start', async (ctx) => {
+  const botUsername = process.env.TELEGRAM_BOT_USERNAME || 'FixtureLineBot';
   const content = buildStartCarouselContent({
-    title: 'Welcome to FixtureLine — your live football intelligence hub.',
-    quickStart: 'Ready to make a pick? Tap Predict or type /predict now.',
+    title: 'FixtureLine is a live football intelligence bot for fans who want match odds, picks, and proof.',
+    quickStart: 'I can show you upcoming fixtures, live market odds, AI-assisted picks, and on-chain verification options.',
     commands: [
       '⚡ /predict <what you are after> — get AI-suggested picks',
       '📌 /mypicks — review your active and recent picks',
       '🏆 /leaderboard — see the top players by points',
       '🔎 /verify <fixtureId> — validate a match with on-chain proof',
-      '📋 /menu — open the footer shortcut keyboard',
+      '📋 /menu — open the shortcut keyboard',
     ],
-    footer: 'Add me to a group or channel for live goal alerts and match edge highlights.',
+    footer: 'Add me to a group or channel for live alerts, market updates, and match proof.',
   });
   await ctx.reply(content.text, {
-    reply_markup: content.reply_markup,
+    reply_markup: buildMainMenu({ botUsername }),
     disable_web_page_preview: true,
   });
 });
