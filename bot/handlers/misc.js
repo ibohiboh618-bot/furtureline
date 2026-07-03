@@ -23,6 +23,14 @@ function registerMiscHandlers(bot) {
   bot.command('help', handleHelp);
   bot.command('menu', handleMenu);
 
+  bot.hears(/^Predict$/i, handlePredictShortcut);
+  bot.hears(/^Markets$/i, handleMarkets);
+  bot.hears(/^My Picks$/i, handleMyPicks);
+  bot.hears(/^Verify$/i, handleVerify);
+  bot.hears(/^Leaderboard$/i, handleLeaderboard);
+  bot.hears(/^Live odds$/i, handleOdds);
+  bot.hears(/^Help$/i, handleHelp);
+
   bot.callbackQuery(/^menu:(predict|mypicks|leaderboard|verify|markets|help|odds)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     const action = getMenuAction(ctx.match[1]);
