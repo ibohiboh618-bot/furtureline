@@ -1,4 +1,4 @@
-const { InlineKeyboard, Keyboard } = require('grammy');
+const { InlineKeyboard } = require('grammy');
 
 function buildMainMenu({ botUsername = 'FixtureLineBot' } = {}) {
   const keyboard = new InlineKeyboard()
@@ -20,18 +20,17 @@ function buildMainMenu({ botUsername = 'FixtureLineBot' } = {}) {
 }
 
 function buildFooterMenu() {
-  return new Keyboard()
-    .text('Predict')
-    .text('Markets')
+  return new InlineKeyboard()
+    .text('Predict', 'menu:predict')
+    .text('Markets', 'menu:markets')
     .row()
-    .text('My Picks')
-    .text('Verify')
+    .text('My Picks', 'menu:mypicks')
+    .text('Verify', 'menu:verify')
     .row()
-    .text('Leaderboard')
-    .text('Live odds')
+    .text('Leaderboard', 'menu:leaderboard')
+    .text('Live odds', 'menu:odds')
     .row()
-    .text('Help')
-    .resized(true);
+    .text('Help', 'menu:help');
 }
 
 function buildStartCarouselContent({ title = 'Welcome to FixtureLine.', quickStart = null, commands = [], footer = 'Add me to a group or channel to get live goal alerts.' } = {}) {
