@@ -42,7 +42,7 @@ function buildStartCarouselContent({ title = 'Welcome to FixtureLine.', quickSta
     lines.push('', quickStart);
   }
 
-  lines.push('', ...commands, '', footer, '', 'Tap a button below to get started.');
+  lines.push('', ...commands, '', footer, '', 'Tap a button below to start, or type /help for details.');
 
   return {
     text: lines.join('\n'),
@@ -56,13 +56,13 @@ function buildGroupOnboardingMessage({ chatType = 'group' } = {}) {
   const body = [
     headline,
     '',
-    'Admins can choose the alert intensity with /alertlevel.',
-    'Options: goals_only, goals_and_cards, or all_events.',
-    'Use /odds to see live market snapshots and the latest betting lines for matches.',
+    'Use /odds to list upcoming fixtures and copy the fixture ID for /verify or /odds.',
+    'Admins can change alert intensity with /alertlevel: goals_only, goals_and_cards, all_events.',
+    'Press Live odds to see the next matches with market pricing and pick context.',
     '',
     isChannel
-      ? 'Use it to broadcast match moments, market flashes, and odds updates to your audience.'
-      : 'Tip: add the bot to a channel too for the same live-match flow.',
+      ? 'Use me in a channel to broadcast alerts and live-match updates to your audience.'
+      : 'Add the bot to a channel too for a cleaner live match feed.',
   ];
 
   return { text: body.join('\n') };

@@ -42,6 +42,11 @@ function registerMiscHandlers(bot) {
     if (action === 'odds') return handleOdds(ctx);
     return handleHelp(ctx);
   });
+
+  bot.callbackQuery(/^odds:(\d+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    return handleOdds(ctx, ctx.match[1]);
+  });
 }
 
 function getMenuAction(name) {
@@ -65,12 +70,11 @@ function getMenuAction(name) {
   }
 }
 
-async function handleOdds(ctx) {
-  const parts = (ctx.message?.text || '').trim().split(/\s+/);
-  const fixtureId = parts.length > 1 ? parts[1] : null;
+async function handleOdds(ctx, overrideFixtureId = null) {
+  const fixtureId = overrideFixtureId || getOddsInput(ctx);
 
   if (!fixtureId) {
-    // list upcoming fixtures with a short id so users can call /odds <id>
+    // list upcoming fixtures with a short id so users can call /odds <fixtureId>
     const { rows } = await pool.query(
       `select id, home_team, away_team, kickoff_at
        from fixtures
@@ -80,12 +84,27 @@ async function handleOdds(ctx) {
        limit 6`
     );
 
-    if (rows.length === 0) return ctx.reply('No upcoming fixtures with odds available.', { reply_markup: buildFooterMenu() });
+    if (rows.length === 0) {
+      return ctx.reply('No upcoming fixtures with odds available right now.', { reply_markup: buildFooterMenu() });
+    }
 
     const lines = rows.map(r => `${r.id} — ${r.home_team} vs ${r.away_team} (kickoff ${new Date(r.kickoff_at).toISOString()})`);
-    lines.unshift('Upcoming fixtures (use /odds <fixtureId> to view markets):', '');
+    lines.unshift(
+      'Upcoming fixtures with live odds:',
+      'Tap Copy ID to paste the fixture ID into the chat, then send /odds <fixtureId> or /verify <fixtureId>.',
+      ''
+    );
 
-    return ctx.reply(lines.join('\n'), { reply_markup: buildFooterMenu() });
+    const keyboard = new InlineKeyboard();
+    for (const r of rows) {
+      keyboard
+        .switchInlineCurrent(`Copy ${r.id}`, r.id)
+        .text('Show odds', `odds:${r.id}`)
+        .row();
+    }
+    keyboard.text('Help', 'menu:help');
+
+    return ctx.reply(lines.join('\n'), { reply_markup: keyboard });
   }
 
   // show latest market snapshots for the fixture
@@ -155,15 +174,16 @@ async function handleLeaderboard(ctx) {
 
 async function handleHelp(ctx) {
   const text = [
-    'FixtureLine is a football intelligence bot built for fans.',
+    'FixtureLine is a football intelligence bot for fans who want live odds, picks, and proof.',
     '',
-    'It combines live match updates, market insights, AI-assisted picks, and on-chain proof.',
+    'Use the buttons below or type one of these commands:',
+    '• /predict — get an AI-assisted pick',
+    '• /odds <fixtureId> — view odds for a match',
+    '• /verify <fixtureId> — validate match data on-chain',
+    '• /mypicks — see your active picks',
+    '• /leaderboard — view the top players',
     '',
-    'Quick actions:',
-    '• Predict — get AI-assisted picks',
-    '• Markets — inspect upcoming odds and market context',
-    '• My Picks — review your active picks',
-    '• Verify — inspect a fixture’s on-chain proof',
+    'To get a fixture ID, open /odds and tap Copy ID next to a match.',
   ].join('\n');
 
   await ctx.reply(text, { reply_markup: buildFooterMenu() });
@@ -183,7 +203,7 @@ async function handleMarkets(ctx) {
 async function handleVerify(ctx) {
   const fixtureIdStr = getVerifyInput(ctx);
   if (!fixtureIdStr || Number.isNaN(Number(fixtureIdStr))) {
-    return ctx.reply('Usage: /verify <fixtureId>', { reply_markup: buildFooterMenu() });
+    return ctx.reply('Usage: /verify <fixtureId>. Copy a fixture ID from /odds output if you need one.', { reply_markup: buildFooterMenu() });
   }
 
   await ctx.replyWithChatAction('typing');
@@ -274,6 +294,21 @@ function getVerifyInput(ctx) {
   return null;
 }
 
+function getOddsInput(ctx) {
+  if (!ctx) return null;
+
+  if (ctx.match && typeof ctx.match === 'object' && typeof ctx.match[1] === 'string') {
+    return ctx.match[1].trim();
+  }
+
+  if (typeof ctx.message?.text === 'string') {
+    const parts = ctx.message.text.trim().split(/\s+/);
+    if (parts.length > 1) return parts[1];
+  }
+
+  return null;
+}
+
 async function getMarketInsights() {
   const { rows } = await pool.query(
     `select
@@ -345,7 +380,7 @@ async function fetchMerkleProof(fixtureId, jwt, apiToken) {
 }
 
 async function handleMenu(ctx) {
-  await ctx.reply('Quick access commands:', { reply_markup: buildFooterMenu() });
+  await ctx.reply('Choose an action below, or type /help for guidance.', { reply_markup: buildFooterMenu() });
 }
 
 module.exports = {
