@@ -114,6 +114,7 @@ function getAutoDeleteMs({ chatType, kind }) {
 module.exports = {
   buildMainMenu,
   buildFooterMenu,
+  buildOnboardingMenu,
   buildStartCarouselContent,
   buildGroupOnboardingMessage,
   buildGroupAdminGuide,

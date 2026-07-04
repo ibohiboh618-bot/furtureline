@@ -71,6 +71,8 @@ bot.catch((err) => {
 async function startPolling() {
   const retryCount = 8;
   const retryDelayMs = 5000;
+  const recoveryWebhookUrl = 'https://example.com/fixtureline-telegram-recovery';
+
   for (let attempt = 1; attempt <= retryCount; attempt++) {
     try {
       console.log(`[bot] polling attempt ${attempt}/${retryCount}...`);
@@ -84,8 +86,19 @@ async function startPolling() {
       if (!isConflict || attempt === retryCount) {
         throw e;
       }
-      console.warn(`[bot] stale getUpdates session still active; retrying in ${retryDelayMs / 1000}s...`);
+
+      console.warn(`[bot] stale getUpdates session still active; attempting webhook recovery before retrying in ${retryDelayMs / 1000}s...`);
+      try {
+        await bot.api.setWebhook(recoveryWebhookUrl, { drop_pending_updates: true });
+      } catch (setError) {
+        console.warn('[bot] recovery webhook set failed:', setError.message || setError);
+      }
       await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+      try {
+        await bot.api.deleteWebhook({ drop_pending_updates: true });
+      } catch (delError) {
+        console.warn('[bot] recovery webhook delete failed:', delError.message || delError);
+      }
     }
   }
 }
