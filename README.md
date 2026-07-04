@@ -1,12 +1,12 @@
 # FixtureLine
 
-FixtureLine is a Telegram-first football intelligence bot built for the TxODDS hackathon. It combines live fixture data, AI-assisted prediction suggestions, wallet-backed actions, and on-chain proof tracking into one experience for fans.
+FixtureLine is a Telegram-first football intelligence bot built for the TxODDS hackathon. It combines live fixture data, QVAC-powered prediction suggestions, wallet-backed actions, and on-chain proof tracking into one experience for fans.
 
 ## What the product does
 
 Users can:
 
-- ask for AI-assisted predictions with `/predict`
+- ask for QVAC-powered predictions with `/predict`
 - confirm a pick and stake in-app points
 - create a wallet and transaction pin with `/wallet`
 - unlock wallet export details in `/settings`
@@ -20,11 +20,13 @@ The experience is designed to feel like a polished consumer app while staying wi
 
 Welcome to FixtureLine — your live football intelligence hub.
 
-- ⚡ `/predict <what you are after>` — get AI-suggested picks
+New users are guided through wallet-first onboarding. The first step is creating a wallet with `/wallet` before the bot unlocks its full menu.
+
+- 🔐 `/wallet <6-digit-pin>` — create a wallet and transaction pin
+- ⚡ `/predict <what you are after>` — get QVAC-powered prediction suggestions
 - 📌 `/mypicks` — review your active and recent picks
 - 🏆 `/leaderboard` — see the top players by points
 - 🔎 `/verify <fixtureId>` — validate a match with on-chain proof
-- 🔐 `/wallet <6-digit-pin>` — create a wallet and transaction pin
 - 🛡️ `/settings <6-digit-pin>` — unlock wallet export details
 
 Add the bot to a group or channel for live alerts and match proof highlights.
@@ -35,13 +37,14 @@ The bot fetches TxODDS proof payloads for a fixture and validates them on Solana
 
 ## Product flow
 
-1. The user starts the bot and learns the key features from the welcome screen.
+1. The user starts the bot and is guided to create a wallet first.
 2. The user creates a wallet with a transaction pin.
-3. The user asks for a prediction suggestion.
-4. The user confirms the pick and the bot stores the prediction.
-5. Settlement and proof metadata are recorded for the prediction outcome.
+3. After wallet setup, the bot unlocks the full menu and QVAC prediction flow.
+4. The user asks for a QVAC-powered prediction suggestion.
+5. The user confirms the pick and the bot stores the prediction.
+6. Settlement and proof metadata are recorded for the prediction outcome.
 
-This keeps the experience simple for the user while preserving the core technical layers of AI, wallet actions, and runtime proof.
+This keeps the experience simple for the user while preserving the core technical layers of QVAC AI, wallet actions, and runtime proof.
 
 ## Why three separate processes
 
@@ -81,6 +84,9 @@ directly. They only share Postgres. This means:
 6. Start all three processes (`npm run ingest:odds`, `npm run ingest:scores`,
    `npm run bot`) -- ideally under a process manager (pm2, systemd, or
    separate containers) so each restarts independently on failure.
+
+The prediction engine is powered by the QVAC SDK; the bot falls back to a
+local deterministic selection only if QVAC is unavailable at runtime.
 
 ## Compliance notes, read before extending
 
