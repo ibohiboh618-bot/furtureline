@@ -32,15 +32,17 @@ bot.command('start', async (ctx) => {
   const botUsername = process.env.TELEGRAM_BOT_USERNAME || 'FixtureLineBot';
   const content = buildStartCarouselContent({
     title: 'FixtureLine is a live football intelligence bot for fans who want match odds, picks, and proof.',
-    quickStart: 'I can show you upcoming fixtures, live market odds, AI-assisted picks, and on-chain verification options.',
+    quickStart: 'Start by creating a transaction pin with /wallet <6-digit-pin>. That pin unlocks wallet settings later, while the private key stays hidden until you enter the pin in /settings.',
     commands: [
       '⚡ /predict <what you are after> — get AI-suggested picks',
       '📌 /mypicks — review your active and recent picks',
       '🏆 /leaderboard — see the top players by points',
       '🔎 /verify <fixtureId> — validate a match with on-chain proof',
+      '🔐 /wallet <6-digit-pin> — create your wallet and transaction pin',
+      '🛡️ /settings <6-digit-pin> — unlock wallet export details',
       '📋 /menu — open the shortcut keyboard',
     ],
-    footer: 'Add me to a group or channel for live alerts, market updates, and match proof.',
+    footer: 'After the wallet is created, the prediction flow stays the same: ask for a pick, confirm it, and let settlement and proof tracking handle the rest.',
   });
   await ctx.reply(content.text, {
     reply_markup: buildMainMenu({ botUsername }),

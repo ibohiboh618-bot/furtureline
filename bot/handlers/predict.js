@@ -9,6 +9,8 @@ require('dotenv').config({ path: ['.env', 'bot/.env'] });
 const { Pool } = require('pg');
 const { InlineKeyboard } = require('grammy');
 const { suggestPicks } = require('../agent/prediction-agent');
+const { createSettlementEnvelope } = require('../wdk');
+const { createRuntimeProof } = require('../pear');
 const { buildFooterMenu } = require('../ui');
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -132,6 +134,28 @@ function registerPredictHandlers(bot) {
       market,
       selection,
       pointsStaked: DEFAULT_STAKE,
+    });
+
+    const settlementEnvelope = createSettlementEnvelope({
+      prediction,
+      fixture,
+      outcome: 'pending',
+      pointsAwarded: 0,
+    });
+
+    await persistSettlementEnvelope({ predictionId: prediction.id, envelope: settlementEnvelope });
+    await persistRuntimeProof({
+      predictionId: prediction.id,
+      proof: createRuntimeProof({
+        eventType: 'prediction-confirmed',
+        entityId: prediction.id,
+        payload: {
+          fixtureId,
+          market,
+          selection,
+          pointsStaked: DEFAULT_STAKE,
+        },
+      }),
     });
 
     await ctx.answerCallbackQuery({ text: 'Pick locked in ✅' });
@@ -308,6 +332,22 @@ async function confirmPrediction({ userId, fixtureId, market, selection, pointsS
   } finally {
     client.release();
   }
+}
+
+async function persistSettlementEnvelope({ predictionId, envelope }) {
+  await pool.query(
+    `insert into settlement_envelopes (prediction_id, envelope_kind, signer, payload_hash, signature, payload)
+     values ($1, $2, $3, $4, $5, $6)`,
+    [predictionId, envelope.kind, envelope.signer, envelope.payloadHash, envelope.signature, JSON.stringify(envelope.payload)]
+  );
+}
+
+async function persistRuntimeProof({ predictionId, proof }) {
+  await pool.query(
+    `insert into runtime_proofs (prediction_id, proof_kind, event_type, proof_hash, payload)
+     values ($1, $2, $3, $4, $5)`,
+    [predictionId, proof.kind, proof.eventType, proof.proofHash, JSON.stringify(proof.payload)]
+  );
 }
 
 function formatPickText(pick, index, fixtureName) {

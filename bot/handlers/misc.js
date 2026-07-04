@@ -10,10 +10,12 @@ const axios = require('axios');
 const { InlineKeyboard } = require('grammy');
 const { buildFooterMenu } = require('../ui');
 const { formatInsightsText } = require('../market-insights');
+const { createWalletSetup, verifyWalletPin, decryptSecret } = require('../wallet');
 const { handlePredictCommand, handleMyPicks } = require('./predict');
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const TXLINE_BASE_URL = process.env.TXLINE_BASE_URL || 'https://txline.txodds.com';
+const pendingWalletActions = new Map();
 
 function registerMiscHandlers(bot) {
   bot.command('leaderboard', handleLeaderboard);
@@ -30,6 +32,8 @@ function registerMiscHandlers(bot) {
   bot.command('favorite-alert-level', handleFavoriteAlerts);
   bot.command('help', handleHelp);
   bot.command('menu', handleMenu);
+  bot.command('wallet', handleWalletSetup);
+  bot.command('settings', handleSettings);
 
   bot.hears(/^Predict$/i, handlePredictShortcut);
   bot.hears(/^Markets$/i, handleMarkets);
@@ -42,7 +46,7 @@ function registerMiscHandlers(bot) {
   bot.hears(/^Live odds$/i, handleOdds);
   bot.hears(/^Help$/i, handleHelp);
 
-  bot.callbackQuery(/^menu:(predict|mypicks|leaderboard|verify|markets|help|odds|about|diagnose)$/, async (ctx) => {
+  bot.callbackQuery(/^menu:(predict|mypicks|leaderboard|verify|markets|help|odds|about|diagnose|wallet|settings)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     const action = getMenuAction(ctx.match[1]);
     if (action === 'predict') return handlePredictShortcut(ctx);
@@ -53,6 +57,8 @@ function registerMiscHandlers(bot) {
     if (action === 'odds') return handleOdds(ctx, null);
     if (action === 'about') return handleAbout(ctx);
     if (action === 'diagnose') return handleDiagnose(ctx);
+    if (action === 'wallet') return handleWalletSetup(ctx);
+    if (action === 'settings') return handleSettings(ctx);
     return handleHelp(ctx);
   });
 
@@ -67,6 +73,25 @@ function registerMiscHandlers(bot) {
   bot.callbackQuery(/^odds:(\d+)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     return handleOdds(ctx, ctx.match[1]);
+  });
+
+  bot.on('message:text', async (ctx) => {
+    if (!ctx.from) return;
+    const state = pendingWalletActions.get(ctx.from.id);
+    if (!state) return;
+
+    pendingWalletActions.delete(ctx.from.id);
+    const normalizedPin = String(ctx.message.text || '').replace(/\D/g, '');
+    if (normalizedPin.length !== 6) {
+      await ctx.reply('Please send exactly 6 digits for the pin.');
+      return;
+    }
+
+    if (state.kind === 'wallet-create') {
+      await createWalletForUser(ctx, normalizedPin);
+    } else if (state.kind === 'wallet-export') {
+      await exportWalletForUser(ctx, normalizedPin);
+    }
   });
 }
 
@@ -90,6 +115,10 @@ function getMenuAction(name) {
       return 'about';
     case 'diagnose':
       return 'diagnose';
+    case 'wallet':
+      return 'wallet';
+    case 'settings':
+      return 'settings';
     default:
       return null;
   }
@@ -201,17 +230,110 @@ async function handleHelp(ctx) {
   const text = [
     'FixtureLine is a football intelligence bot for fans who want live odds, picks, and proof.',
     '',
+    'How the flow works:',
+    '• Start the bot and read the welcome message.',
+    '• Create a wallet with /wallet by setting a transaction pin.',
+    '• The private key is not shown in chat; it is available later in Settings after you enter the pin.',
+    '• Ask for a pick with /predict and confirm it as usual.',
+    '• Settlement and proof events are recorded for your confirmed pick.',
+    '',
     'Use the buttons below or type one of these commands:',
     '• /predict — get an AI-assisted pick',
     '• /odds <fixtureId> — view odds for a match',
     '• /verify <fixtureId> — validate match data on-chain',
     '• /mypicks — see your active picks',
     '• /leaderboard — view the top players',
+    '• /wallet — create or manage your wallet',
+    '• /settings — unlock wallet export details',
     '',
     'To get a fixture ID, open /odds and tap Copy ID next to a match.',
   ].join('\n');
 
   await ctx.reply(text, { reply_markup: buildFooterMenu() });
+}
+
+async function handleWalletSetup(ctx) {
+  if (!ctx.from) return;
+
+  const providedPin = getCommandArg(ctx);
+  if (providedPin) {
+    return createWalletForUser(ctx, providedPin);
+  }
+
+  const text = [
+    'Wallet setup',
+    '',
+    'Create a transaction pin to approve wallet actions.',
+    'This pin is used to unlock wallet export and settings later.',
+    'Your private key will not be shown in the main chat flow.',
+  ].join('\n');
+
+  await ctx.reply(text, { reply_markup: buildFooterMenu() });
+  await ctx.reply('Reply with a 6-digit pin to create your wallet.');
+  pendingWalletActions.set(ctx.from.id, { kind: 'wallet-create' });
+}
+
+async function handleSettings(ctx) {
+  if (!ctx.from) return;
+
+  const providedPin = getCommandArg(ctx);
+  if (providedPin) {
+    return exportWalletForUser(ctx, providedPin);
+  }
+
+  await ctx.reply('Enter your wallet pin to unlock export details.');
+  await ctx.reply('Reply with your 6-digit pin.');
+  pendingWalletActions.set(ctx.from.id, { kind: 'wallet-export' });
+}
+
+async function createWalletForUser(ctx, pin) {
+  const user = await getOrCreateUser(ctx.from);
+  const existingWallet = await getWalletForUser(user.id);
+  if (existingWallet) {
+    return ctx.reply(`A wallet already exists for you.\nAddress: ${existingWallet.address}\nUse /settings <pin> to export your private key.`);
+  }
+
+  const normalizedPin = String(pin || '').replace(/\D/g, '');
+  if (normalizedPin.length !== 6) {
+    return ctx.reply('Please send exactly 6 digits for the pin.');
+  }
+
+  const wallet = createWalletSetup({ pin: normalizedPin });
+  await pool.query(
+    `insert into user_wallets (user_id, address, pin_hash, encrypted_private_key, iv)
+     values ($1, $2, $3, $4, $5)`,
+    [user.id, wallet.address, wallet.pinHash, wallet.encryptedPrivateKey, wallet.iv]
+  );
+
+  await ctx.reply(
+    `Wallet created successfully.\nAddress: ${wallet.address}\nYour private key is kept hidden for now and can be exported later from /settings after you enter the same pin.`
+  );
+}
+
+async function exportWalletForUser(ctx, pin) {
+  const user = await getOrCreateUser(ctx.from);
+  const wallet = await getWalletForUser(user.id);
+  if (!wallet) {
+    return ctx.reply('No wallet has been created yet. Use /wallet <6-digit-pin> to create one first.');
+  }
+
+  const normalizedPin = String(pin || '').replace(/\D/g, '');
+  if (normalizedPin.length !== 6) {
+    return ctx.reply('That pin is not valid.');
+  }
+
+  const verified = verifyWalletPin({ pin: normalizedPin, pinHash: wallet.pin_hash });
+  if (!verified) {
+    return ctx.reply('The pin did not match.');
+  }
+
+  const privateKey = decryptSecret({ ciphertext: wallet.encrypted_private_key, iv: wallet.iv });
+  await ctx.reply(`Wallet unlocked.\nAddress: ${wallet.address}\nPrivate key: ${privateKey}`);
+}
+
+async function getWalletForUser(userId) {
+  const { rows } = await pool.query('select * from user_wallets where user_id = $1', [userId]);
+  return rows[0] || null;
 }
 
 async function handleMarkets(ctx) {

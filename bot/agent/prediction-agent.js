@@ -12,14 +12,14 @@
 // like automated betting.
 
 require('dotenv').config({ path: ['.env', 'bot/.env'] });
-const Groq = require('groq-sdk');
 const { Pool } = require('pg');
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const groqApiKey = process.env.GROQ_API_KEY?.trim();
-const groq = groqApiKey ? new Groq({ apiKey: groqApiKey }) : null;
+let cachedModelId = null;
 
-const MODEL = 'llama-3.3-70b-versatile';
+async function loadQvacSdk() {
+  return import('@qvac/sdk');
+}
 
 const SYSTEM_PROMPT = `You are a football prediction assistant inside a Telegram bot called FixtureLine.
 
@@ -46,11 +46,6 @@ Rules:
  * @returns {Promise<Array<{fixtureId, market, selection, impliedProb, reasoning}>>}
  */
 async function suggestPicks({ preferenceText, riskPreference, favoriteTeams }) {
-  if (!groq) {
-    console.warn('[prediction-agent] GROQ_API_KEY missing; returning empty suggestions');
-    return [];
-  }
-
   const fixtures = await getUpcomingFixturesWithOdds();
 
   if (fixtures.length === 0) {
@@ -65,27 +60,37 @@ async function suggestPicks({ preferenceText, riskPreference, favoriteTeams }) {
 
   const fixtureContext = JSON.stringify(fixtures);
 
-  const completion = await groq.chat.completions.create({
-    model: MODEL,
-    temperature: 0.4,
-    response_format: { type: 'json_object' },
-    messages: [
+  try {
+    const qvac = await loadQvacSdk();
+    const { loadModel, completion, LLAMA_3_2_1B_INST_Q4_0 } = qvac;
+
+    if (!cachedModelId) {
+      cachedModelId = await loadModel({
+        modelSrc: process.env.QVAC_MODEL || LLAMA_3_2_1B_INST_Q4_0,
+      });
+    }
+
+    const history = [
       { role: 'system', content: SYSTEM_PROMPT },
       {
         role: 'user',
         content: `User context:\n${userContext}\n\nUpcoming fixtures and odds:\n${fixtureContext}`,
       },
-    ],
-  });
+    ];
 
-  const raw = completion.choices[0]?.message?.content;
-  if (!raw) return [];
+    const result = completion({ modelId: cachedModelId, history, stream: true });
+    let raw = '';
+    for await (const token of result.tokenStream) {
+      raw += token;
+    }
 
-  try {
-    const parsed = JSON.parse(raw);
+    const normalized = raw.trim().replace(/^```json\s*/i, '').replace(/```$/i, '');
+    if (!normalized) return [];
+
+    const parsed = JSON.parse(normalized);
     return Array.isArray(parsed.picks) ? parsed.picks.slice(0, 3) : [];
   } catch (err) {
-    console.error('[prediction-agent] failed to parse model output:', err.message);
+    console.warn('[prediction-agent] QVAC SDK request failed:', err.message);
     return [];
   }
 }

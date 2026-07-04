@@ -128,6 +128,52 @@ create table points_ledger (
 create index idx_ledger_user on points_ledger (user_id, created_at desc);
 
 -- ---------------------------------------------------------------------------
+-- User wallets (pin-protected wallet setup for the onboarding flow)
+-- ---------------------------------------------------------------------------
+create table user_wallets (
+  id              uuid primary key default gen_random_uuid(),
+  user_id         uuid not null unique references users(id) on delete cascade,
+  address         text not null,
+  pin_hash        text not null,
+  encrypted_private_key text not null,
+  iv              text not null,
+  created_at      timestamptz not null default now()
+);
+
+create index idx_user_wallets_user on user_wallets (user_id);
+
+-- ---------------------------------------------------------------------------
+-- WDK settlement envelopes (signed, auditable settlement payloads)
+-- ---------------------------------------------------------------------------
+create table settlement_envelopes (
+  id              uuid primary key default gen_random_uuid(),
+  prediction_id   uuid not null references predictions(id) on delete cascade,
+  envelope_kind   text not null default 'settlement',
+  signer          text not null,
+  payload_hash    text not null,
+  signature       text not null,
+  payload         jsonb not null,
+  created_at      timestamptz not null default now()
+);
+
+create index idx_settlement_envelopes_prediction on settlement_envelopes (prediction_id);
+
+-- ---------------------------------------------------------------------------
+-- Pear runtime proofs (lightweight sync / runtime audit trail)
+-- ---------------------------------------------------------------------------
+create table runtime_proofs (
+  id              uuid primary key default gen_random_uuid(),
+  prediction_id   uuid not null references predictions(id) on delete cascade,
+  proof_kind      text not null default 'runtime-proof',
+  event_type      text not null,
+  proof_hash      text not null,
+  payload         jsonb not null,
+  created_at      timestamptz not null default now()
+);
+
+create index idx_runtime_proofs_prediction on runtime_proofs (prediction_id);
+
+-- ---------------------------------------------------------------------------
 -- Broadcast targets (groups/channels the bot posts live updates into)
 -- ---------------------------------------------------------------------------
 create table broadcast_targets (

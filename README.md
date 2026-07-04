@@ -94,7 +94,7 @@ bot/
   broadcast-queue.js          rate-limit-aware fan-out to groups/channels
   settlement.js                resolves predictions after full time
   agent/
-    prediction-agent.js        Groq-powered suggestion engine
+    prediction-agent.js        QVAC-powered suggestion engine
   handlers/
     predict.js                /predict, /mypicks, confirm callback
     groups.js                  group/channel onboarding, /alertlevel

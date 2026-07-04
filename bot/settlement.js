@@ -9,6 +9,8 @@
 
 require('dotenv').config({ path: ['.env', 'bot/.env'] });
 const { Pool } = require('pg');
+const { createSettlementEnvelope } = require('./wdk');
+const { createRuntimeProof } = require('./pear');
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
@@ -46,7 +48,7 @@ async function settleFixture(fixture) {
 
   for (const prediction of predictions) {
     const outcome = resolveOutcome(prediction, fixture);
-    await applySettlement(prediction, outcome);
+    await applySettlement(prediction, outcome, fixture);
   }
 }
 
@@ -86,7 +88,7 @@ function resolveOutcome(prediction, fixture) {
   return 'void'; // unsupported market for now -- refund rather than guess
 }
 
-async function applySettlement(prediction, outcome) {
+async function applySettlement(prediction, outcome, fixture) {
   const client = await pool.connect();
   try {
     await client.query('begin');
@@ -122,12 +124,48 @@ async function applySettlement(prediction, outcome) {
 
     await client.query('commit');
     console.log(`[settlement] prediction ${prediction.id} -> ${outcome} (+${pointsAwarded} pts)`);
+
+    try {
+      const envelope = createSettlementEnvelope({
+        prediction,
+        fixture,
+        outcome,
+        pointsAwarded,
+      });
+      await persistSettlementEnvelope({ predictionId: prediction.id, envelope });
+      await persistRuntimeProof({
+        predictionId: prediction.id,
+        proof: createRuntimeProof({
+          eventType: 'prediction-settled',
+          entityId: prediction.id,
+          payload: { outcome, pointsAwarded, fixtureId: fixture.id },
+        }),
+      });
+    } catch (persistErr) {
+      console.warn('[settlement] metadata persistence failed:', persistErr.message);
+    }
   } catch (err) {
     await client.query('rollback');
     console.error('[settlement] failed for prediction', prediction.id, err.message);
   } finally {
     client.release();
   }
+}
+
+async function persistSettlementEnvelope({ predictionId, envelope }) {
+  await pool.query(
+    `insert into settlement_envelopes (prediction_id, envelope_kind, signer, payload_hash, signature, payload)
+     values ($1, $2, $3, $4, $5, $6)`,
+    [predictionId, envelope.kind, envelope.signer, envelope.payloadHash, envelope.signature, JSON.stringify(envelope.payload)]
+  );
+}
+
+async function persistRuntimeProof({ predictionId, proof }) {
+  await pool.query(
+    `insert into runtime_proofs (prediction_id, proof_kind, event_type, proof_hash, payload)
+     values ($1, $2, $3, $4, $5)`,
+    [predictionId, proof.kind, proof.eventType, proof.proofHash, JSON.stringify(proof.payload)]
+  );
 }
 
 if (require.main === module) {
