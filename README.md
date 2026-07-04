@@ -1,7 +1,20 @@
 # FixtureLine
 
-Telegram bot for the TxODDS World Cup hackathon. Live match updates, AI-suggested
-predictions (points-based, not real money), and on-chain verified results.
+FixtureLine is a Telegram-first football intelligence bot built for the TxODDS hackathon. It combines live fixture data, AI-assisted prediction suggestions, wallet-backed actions, and on-chain proof tracking into one experience for fans.
+
+## What the product does
+
+Users can:
+
+- ask for AI-assisted predictions with `/predict`
+- confirm a pick and stake in-app points
+- create a wallet and transaction pin with `/wallet`
+- unlock wallet export details in `/settings`
+- review active picks with `/mypicks`
+- view leaderboard standings and live odds
+- request verification and proof details with `/verify`
+
+The experience is designed to feel like a polished consumer app while staying within the hackathon constraints of a points-based, non-cash system.
 
 ## What users see on /start
 
@@ -11,12 +24,24 @@ Welcome to FixtureLine — your live football intelligence hub.
 - 📌 `/mypicks` — review your active and recent picks
 - 🏆 `/leaderboard` — see the top players by points
 - 🔎 `/verify <fixtureId>` — validate a match with on-chain proof
+- 🔐 `/wallet <6-digit-pin>` — create a wallet and transaction pin
+- 🛡️ `/settings <6-digit-pin>` — unlock wallet export details
 
-Add the bot to a group or channel for live goal alerts and match edge highlights.
+Add the bot to a group or channel for live alerts and match proof highlights.
 
 ## Live devnet verification
 
 The bot fetches TxODDS proof payloads for a fixture and validates them on Solana using the devnet `validate_fixture` instruction. `/verify <fixtureId>` now returns the Merkle root, batch timestamp, and a Solana explorer link for the validation transaction.
+
+## Product flow
+
+1. The user starts the bot and learns the key features from the welcome screen.
+2. The user creates a wallet with a transaction pin.
+3. The user asks for a prediction suggestion.
+4. The user confirms the pick and the bot stores the prediction.
+5. Settlement and proof metadata are recorded for the prediction outcome.
+
+This keeps the experience simple for the user while preserving the core technical layers of AI, wallet actions, and runtime proof.
 
 ## Why three separate processes
 

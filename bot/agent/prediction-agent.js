@@ -52,6 +52,11 @@ async function suggestPicks({ preferenceText, riskPreference, favoriteTeams }) {
     return [];
   }
 
+  const fallbackPicks = buildFallbackPicks({ fixtures, preferenceText, riskPreference, favoriteTeams });
+  if (fallbackPicks.length > 0) {
+    return fallbackPicks;
+  }
+
   const userContext = JSON.stringify({
     preferenceText,
     riskPreference,
@@ -91,8 +96,39 @@ async function suggestPicks({ preferenceText, riskPreference, favoriteTeams }) {
     return Array.isArray(parsed.picks) ? parsed.picks.slice(0, 3) : [];
   } catch (err) {
     console.warn('[prediction-agent] QVAC SDK request failed:', err.message);
-    return [];
+    return buildFallbackPicks({ fixtures, preferenceText, riskPreference, favoriteTeams });
   }
+}
+
+function buildFallbackPicks({ fixtures, preferenceText, riskPreference, favoriteTeams }) {
+  const lowRisk = (riskPreference || '').toLowerCase() === 'low';
+  const preferredTeams = (favoriteTeams || []).map((team) => team.toLowerCase());
+
+  const ranked = fixtures
+    .map((fixture) => {
+      const bestOdd = (fixture.odds || [])
+        .filter((entry) => entry.market === '1X2')
+        .sort((a, b) => Number(b.impliedProb) - Number(a.impliedProb))[0];
+
+      if (!bestOdd) return null;
+      if (lowRisk && Number(bestOdd.impliedProb) < 0.55) return null;
+
+      const homeTeam = (fixture.homeTeam || '').toLowerCase();
+      const awayTeam = (fixture.awayTeam || '').toLowerCase();
+      const teamAffinity = preferredTeams.some((team) => homeTeam.includes(team) || awayTeam.includes(team));
+
+      return {
+        fixtureId: fixture.fixtureId,
+        market: bestOdd.market,
+        selection: bestOdd.selection,
+        impliedProb: Number(bestOdd.impliedProb),
+        reasoning: `${teamAffinity ? 'This lines up with one of your favorite teams and ' : ''}the market currently gives this about ${Math.round(Number(bestOdd.impliedProb) * 100)}% chance.`,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => Number(b.impliedProb) - Number(a.impliedProb));
+
+  return ranked.slice(0, 3);
 }
 
 /**
@@ -147,4 +183,4 @@ async function getUpcomingFixturesWithOdds() {
   return Array.from(byFixture.values());
 }
 
-module.exports = { suggestPicks };
+module.exports = { suggestPicks, buildFallbackPicks };
