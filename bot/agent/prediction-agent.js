@@ -18,7 +18,11 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 let cachedModelId = null;
 
 async function loadQvacSdk() {
-  return import('@qvac/sdk');
+  try {
+    return await import('@qvac/sdk');
+  } catch (err) {
+    return null;
+  }
 }
 
 const SYSTEM_PROMPT = `You are a football prediction assistant inside a Telegram bot called FixtureLine.
@@ -67,6 +71,10 @@ async function suggestPicks({ preferenceText, riskPreference, favoriteTeams }) {
 
   try {
     const qvac = await loadQvacSdk();
+    if (!qvac) {
+      return buildFallbackPicks({ fixtures, preferenceText, riskPreference, favoriteTeams });
+    }
+
     const { loadModel, completion, LLAMA_3_2_1B_INST_Q4_0 } = qvac;
 
     if (!cachedModelId) {

@@ -4,6 +4,6 @@
     "builder": "RAILPACK"
   },
   "deploy": {
-    "startCommand": "npm start"
+    "startCommand": "npm run start:railway"
   }
 }
