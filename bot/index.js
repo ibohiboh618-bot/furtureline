@@ -69,7 +69,8 @@ bot.catch((err) => {
 });
 
 async function startPolling() {
-  const retryCount = 2;
+  const retryCount = 8;
+  const retryDelayMs = 5000;
   for (let attempt = 1; attempt <= retryCount; attempt++) {
     try {
       console.log(`[bot] polling attempt ${attempt}/${retryCount}...`);
@@ -83,8 +84,8 @@ async function startPolling() {
       if (!isConflict || attempt === retryCount) {
         throw e;
       }
-      console.warn('[bot] detected stale getUpdates session; retrying after delay...');
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+      console.warn(`[bot] stale getUpdates session still active; retrying in ${retryDelayMs / 1000}s...`);
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
     }
   }
 }
