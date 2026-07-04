@@ -68,6 +68,27 @@ bot.catch((err) => {
   console.error('[bot] unhandled error:', err.error ?? err);
 });
 
+async function startPolling() {
+  const retryCount = 2;
+  for (let attempt = 1; attempt <= retryCount; attempt++) {
+    try {
+      console.log(`[bot] polling attempt ${attempt}/${retryCount}...`);
+      await bot.api.deleteWebhook({ drop_pending_updates: true });
+      await bot.start();
+      return;
+    } catch (e) {
+      const message = (e && e.message) ? e.message : String(e);
+      const isConflict = message.includes('terminated by other getUpdates request');
+      console.warn('[bot] polling startup failed:', message);
+      if (!isConflict || attempt === retryCount) {
+        throw e;
+      }
+      console.warn('[bot] detected stale getUpdates session; retrying after delay...');
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+  }
+}
+
 async function main() {
   try {
     broadcastQueue.init(bot);
@@ -81,8 +102,7 @@ async function main() {
       if (!webhookUrl) {
         if (!strict) {
           console.warn('[bot] TELEGRAM_WEBHOOK_URL is missing; falling back to long polling');
-          console.log('[bot] starting long polling...');
-          await bot.start();
+          await startPolling();
           return;
         }
         throw new Error('TELEGRAM_WEBHOOK_URL required when TELEGRAM_MODE=webhook');
@@ -96,8 +116,7 @@ async function main() {
         if (!strict) {
           console.warn('[bot] Invalid TELEGRAM_WEBHOOK_URL:', e.message);
           console.warn('[bot] falling back to long polling (TELEGRAM_STRICT_WEBHOOK is not set)');
-          console.log('[bot] starting long polling...');
-          await bot.start();
+          await startPolling();
           return;
         }
         throw new Error(`Invalid TELEGRAM_WEBHOOK_URL: ${e.message}`);
@@ -112,8 +131,7 @@ async function main() {
         if (!strict) {
           console.warn('[bot] falling back to long polling (TELEGRAM_STRICT_WEBHOOK is not set)');
           console.warn('[bot] NOTE: consider fixing TELEGRAM_WEBHOOK_URL or set TELEGRAM_STRICT_WEBHOOK=true to fail fast');
-          console.log('[bot] starting long polling...');
-          await bot.start();
+          await startPolling();
           return;
         }
         throw e;
@@ -127,11 +145,11 @@ async function main() {
       const port = process.env.PORT || 3000;
       app.listen(port, () => console.log(`[bot] webhook listening on ${port}`));
     } else {
-      console.log('[bot] starting long polling...');
-      await bot.start();
+      await startPolling();
     }
   } catch (err) {
     console.error('[bot] startup failed:', err.message);
+    console.error('[bot] If the bot token is in use by another process, stop that process or use a different bot token.');
     process.exit(1);
   }
 }
