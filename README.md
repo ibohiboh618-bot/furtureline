@@ -1,175 +1,203 @@
 # FixtureLine
 
-FixtureLine is a Telegram-first football intelligence bot built for the TxODDS hackathon. It combines live fixture data, QVAC-powered prediction suggestions, wallet-backed actions, and on-chain proof tracking into one experience for fans.
+FixtureLine is a Telegram-first football intelligence bot that combines live fixture data, QVAC-powered prediction suggestions, wallet-backed actions, and on-chain proof verification.
 
-## What the product does
+## Overview
 
-Users can:
+FixtureLine helps football fans discover recommended match picks, track active selections, and verify outcomes with proof-backed data. The bot is built around a wallet-first onboarding flow, requiring users to establish a protected wallet before accessing the full prediction experience.
 
-- ask for QVAC-powered predictions with `/predict`
-- confirm a pick and stake in-app points
-- create a wallet and transaction pin with `/wallet`
-- unlock wallet export details in `/settings`
-- review active picks with `/mypicks`
-- view leaderboard standings and live odds
-- request verification and proof details with `/verify`
+Key features:
 
-The experience is designed to feel like a polished consumer app while staying within the hackathon constraints of a points-based, non-cash system.
+- Wallet-first onboarding using a 6-digit transaction pin
+- QVAC-powered prediction suggestions from current odds and user context
+- Points-based pick confirmation and staking
+- Active picks review with `/mypicks`
+- Leaderboard ranking
+- Odds browsing and fixture lookup with `/odds`
+- Verification of match outcomes and proof with `/verify`
 
-## What users see on /start
+## User experience
 
-Welcome to FixtureLine — your live football intelligence hub.
+The core user journey is:
 
-New users are guided through wallet-first onboarding. The first step is creating a wallet with `/wallet` before the bot unlocks its full menu.
+1. User starts the bot and receives a guided welcome.
+2. User creates a wallet with `/wallet <6-digit-pin>`.
+3. The bot unlocks the full menu after wallet creation.
+4. User requests a prediction with `/predict`.
+5. User confirms a suggested pick with the provided button.
+6. The bot records the pick, adjusts the point balance, and tracks proof metadata.
 
-- 🔐 `/wallet <6-digit-pin>` — create a wallet and transaction pin
-- ⚡ `/predict <what you are after>` — get QVAC-powered prediction suggestions
-- 📌 `/mypicks` — review your active and recent picks
-- 🏆 `/leaderboard` — see the top players by points
-- 🔎 `/verify <fixtureId>` — validate a match with on-chain proof
-- 🛡️ `/settings <6-digit-pin>` — unlock wallet export details
+## Commands
 
-Add the bot to a group or channel for live alerts and match proof highlights.
+- `/start` — welcome message and wallet onboarding guidance
+- `/wallet <6-digit-pin>` — create a wallet and transaction pin
+- `/settings` — unlock wallet export details with the pin
+- `/predict <preference>` — request QVAC-powered prediction suggestions
+- `/mypicks` — list active and recent picks
+- `/leaderboard` — show top users by points
+- `/odds` — list upcoming fixtures and odds
+- `/verify <fixtureId>` — verify match proof data on-chain
+- `/help` — usage tips and command guidance
+- `/menu` — open the shortcut keyboard
 
-## Live devnet verification
+## Architecture
 
-The bot fetches TxODDS proof payloads for a fixture and validates them on Solana using the devnet `validate_fixture` instruction. `/verify <fixtureId>` now returns the Merkle root, batch timestamp, and a Solana explorer link for the validation transaction.
+FixtureLine is structured into three main layers:
 
-## Product flow
+- `bot/` — Telegram bot integration, handlers, prediction flow, and wallet UX
+- `ingestion/` — TxODDS data ingestion, normalization, and persistence
+- `db/` — schema definitions and migration tooling
 
-1. The user starts the bot and is guided to create a wallet first.
-2. The user creates a wallet with a transaction pin.
-3. After wallet setup, the bot unlocks the full menu and QVAC prediction flow.
-4. The user asks for a QVAC-powered prediction suggestion.
-5. The user confirms the pick and the bot stores the prediction.
-6. Settlement and proof metadata are recorded for the prediction outcome.
+The ingestion workers write normalized odds, fixture, and score data into Postgres. The bot reads that data to generate predictions, display odds, and provide verification guidance.
 
-This keeps the experience simple for the user while preserving the core technical layers of QVAC AI, wallet actions, and runtime proof.
+### Process separation
 
-## Why three separate processes
+The system runs as separate processes to reduce coupling:
 
-Run these independently, not as one monolith:
+- a Telegram bot process for user interaction
+- an odds ingestion worker for live market data
+- a score ingestion worker for match result updates
 
+This separation ensures the bot remains responsive even if ingestion is temporarily delayed, and isolates the bot from raw data collection failures.
+
+## QVAC prediction engine
+
+Prediction suggestions are generated by the QVAC SDK in `bot/agent/prediction-agent.js`.
+
+- `loadQvacSdk()` dynamically imports `@qvac/sdk`.
+- A QVAC model is loaded using `process.env.QVAC_MODEL` or a default model constant.
+- The bot builds a strict prompt with user preference, risk profile, favorite teams, and current odds.
+- The model outputs structured JSON representing candidate picks.
+- The bot parses the JSON and returns up to three lookup-ready predictions.
+
+If the QVAC SDK is unavailable at runtime, the agent falls back to a deterministic local selection strategy. This fallback only activates when the QVAC runtime is missing or fails.
+
+## Wallet design
+
+Wallet state is managed in `bot/wallet.js` and protected by a user pin.
+
+- Each wallet is linked to a Telegram user record.
+- The private key is generated on first wallet creation and never exposed in normal chat flow.
+- The private key is encrypted with AES-256-CBC using `WALLET_ENCRYPTION_KEY`.
+- The pin is hashed before storage; plaintext pins are never stored.
+- `/settings` prompts the user for the pin before returning private key export details.
+
+## Database schema
+
+Schema migrations are managed by `scripts/apply-schema.js` using `db/schema.sql`.
+
+Core tables include:
+
+- `users` — Telegram user profiles and session info
+- `fixtures` — scheduled matches and metadata
+- `odds_snapshots` — normalized market odds over time
+- `predictions` — user picks and stakes
+- `points_ledger` — point transactions for staking and settlement
+- `user_wallets` — wallet address, encrypted key, and pin hash
+- `settlement_envelopes` — settlement proof artifacts
+- `runtime_proofs` — lifecycle event proofs for predictions
+
+## Settlement and verification
+
+Prediction confirmation is handled in `bot/handlers/predict.js`.
+
+- Confirming a pick stores a pending prediction and debits the user's point balance.
+- The bot creates settlement envelopes and runtime proofs for auditability.
+- `bot/settlement.js` resolves fixture outcomes and records settlement proof metadata.
+- `/verify` attempts to validate fixture data using a dedicated verification service.
+
+Verification is intentionally decoupled from the main bot process so proof operations can run in a separate service or deployment.
+
+## Onboarding and menu gating
+
+Onboarding is wallet-first and menu-gated:
+
+- `/start` shows a welcome message and onboarding instructions.
+- The bot displays only wallet setup actions until a wallet exists.
+- After wallet creation, the full menu is unlocked.
+- `/menu` reflects the current wallet state and shows either onboarding or the full main menu.
+
+This flow ensures every user sets up their wallet before making predictions or verifying matches.
+
+## Running the project
+
+1. Install dependencies:
+
+```bash
+npm install
 ```
-npm run db:migrate     # once, sets up schema
-npm run ingest:odds    # long-running, writes odds_snapshots
-npm run ingest:scores  # long-running, writes score_events + updates fixtures
-npm run bot            # long-running, the Telegram-facing process
+
+2. Create environment config from `.env.example`.
+
+3. Set required environment variables:
+
+- `TELEGRAM_BOT_TOKEN`
+- `DATABASE_URL`
+- `WALLET_ENCRYPTION_KEY`
+- `QVAC_MODEL` (optional)
+- `VERIFY_SERVICE_URL` / `VERIFY_SERVICE_TOKEN` (optional)
+
+4. Run database migrations:
+
+```bash
+npm run db:migrate
 ```
 
-The ingestion workers never talk to Telegram. The bot never talks to TxODDS
-directly. They only share Postgres. This means:
+5. Start the processes:
 
-- A bot crash/restart never drops a goal from the live feed.
-- A TxODDS hiccup (reconnect, 401, rate limit) never takes the bot offline.
-- The broadcast queue's rate-limit logic lives in exactly one place
-  (`bot/broadcast-queue.js`), not duplicated across workers.
+```bash
+npm run ingest:odds
+npm run ingest:scores
+npm run bot
+```
 
-## First-time setup
+## Deployment
 
-1. `npm install`
-2. Copy `.env.example` to `.env` and fill it in.
-3. Generate or import a Solana wallet keypair, fund it with a small amount
-   of SOL for gas (the free tier subscription itself costs 0 TxL, but the
-   on-chain `subscribe` transaction still needs gas).
-4. Run `npm run db:migrate`.
-5. Bootstrap the TxODDS session once:
-   ```js
-   const { bootstrapSession } = require('./ingestion/workers/session-keeper');
-   // wire up `program` per TxODDS's IDL/devnet docs, then:
-   await bootstrapSession({ walletKeypair, program });
-   ```
-   This only needs to run once every ~4 weeks (the subscription period).
-   After that, `session-keeper.js` refreshes the JWT automatically.
-6. Start all three processes (`npm run ingest:odds`, `npm run ingest:scores`,
-   `npm run bot`) -- ideally under a process manager (pm2, systemd, or
-   separate containers) so each restarts independently on failure.
+`bot/index.js` supports both polling and webhook modes via `TELEGRAM_MODE`.
 
-The prediction engine is powered by the QVAC SDK; the bot falls back to a
-local deterministic selection only if QVAC is unavailable at runtime.
+- Use polling mode by default for a simple deployment.
+- Set `TELEGRAM_MODE=webhook` with `TELEGRAM_WEBHOOK_URL` for webhook hosting.
 
-## Compliance notes, read before extending
-
-- **No real money.** `points_balance` is an in-app number, never
-  withdrawable, never tied to a payment processor. This is deliberate:
-  Telegram's own ToS prohibits real-money betting bots, and the hackathon
-  terms flag gambling-law compliance explicitly. If you're ever tempted to
-  add a "cash out" feature, stop and reread the hackathon terms first.
-- **No raw TxODDS redistribution.** `ingestion/txodds/normalize.js` is the
-  only place allowed to see TxODDS's raw wire format. Everything past that
-  point (Postgres, the bot, the prediction agent) only ever sees our own
-  normalized shape. Don't pipe raw TxODDS payloads into a Telegram message
-  or expose them via any API.
-- **The prediction agent suggests, it never confirms.** Only an explicit
-  button tap in `bot/handlers/predict.js` (`confirm_pick:...` callback)
-  writes to `predictions` or debits `points_ledger`. Keep it that way --
-  it's both a hackathon eligibility point (human-authored submissions only)
-  and a basic safety boundary against the bot looking like an autonomous
-  trading agent.
+The bot can run independently from ingestion workers. For verification, a separate service can be deployed to handle proof and on-chain validation requests.
 
 ## Directory layout
 
 ```
 db/schema.sql              Postgres schema
-ingestion/
-  txodds/
-    auth.js                 Solana subscribe + API token activation
-    normalize.js            raw TxODDS payload -> our internal shape
-    sse-client.js            reconnecting SSE wrapper
-  workers/
-    session-keeper.js        owns JWT/API token lifecycle
-    odds-listener.js          long-running odds stream consumer
-    score-listener.js         long-running scores stream consumer
+scripts/apply-schema.js     schema migration runner
 bot/
-  index.js                   entrypoint, wires handlers together
-  broadcast-queue.js          rate-limit-aware fan-out to groups/channels
-  settlement.js                resolves predictions after full time
-  agent/
-    prediction-agent.js        QVAC-powered suggestion engine
-  handlers/
-    predict.js                /predict, /mypicks, confirm callback
-    groups.js                  group/channel onboarding, /alertlevel
-    misc.js                     /leaderboard, /verify
+  index.js                   Telegram bot entrypoint
+  wallet.js                  wallet creation and pin protection
+  ui.js                      keyboard builders and onboarding UX
+  agent/prediction-agent.js  QVAC-powered prediction engine
+  handlers/                  command and callback handlers
+  settlement.js              prediction settlement and proof storage
+  broadcast-queue.js         message fan-out and rate limiting
+ingestion/
+  txodds/                    TxODDS integration and normalization
+  workers/                   long-running ingestion processes
 ```
 
-## What's still a stub
+## Implementation notes
 
-- `auth.js` assumes an Anchor `program` object is constructed elsewhere
-  (devnet vs mainnet program ID, IDL loading) -- wire that up per TxODDS's
-  published IDL before `bootstrapSession()` will run.
-- Settlement only handles the `1X2` market. Extend `resolveOutcome()` in
-  `settlement.js` for BTTS/over-under once those are wired into the agent.
+- Bot logic uses `grammy` for Telegram integration.
+- Postgres is the single source of truth for fixtures, odds, users, and predictions.
+- Prediction suggestions are driven by current odds and user context.
+- Wallet encryption is implemented with AES-256-CBC and an environment key.
+- Proof and settlement metadata are stored separately for auditability.
 
-## Verify worker (deployment)
+## Technology stack
 
-The repository includes a small verify worker under `ingestion/txodds` that
-performs on-chain validation using Anchor. Because Anchor and some Solana
-ecosystem libraries are ESM-heavy, the verify worker should run as a
-separate service (not inside the Telegram bot process).
+- Node.js
+- Postgres
+- Telegram Bot API via `grammy`
+- QVAC SDK (`@qvac/sdk`) for prediction generation
+- AES encryption for secure wallet key storage
+- TxODDS data normalization for odds and fixture wiring
 
-Files of interest:
+## Contribution guidance
 
-- `ingestion/txodds/verify-service.js` — HTTP worker exposing `/health`,
-  `/verify` and `/verify-by-id`.
-- `ingestion/txodds/package.json` — focused dependencies for the worker.
-- `ingestion/txodds/Dockerfile` — example Dockerfile to build the worker image.
-- `ingestion/txodds/railway.json` and `ingestion/txodds/Procfile` — sample
-  Railway deployment config for the verify worker.
-
-Local run (verify worker):
-
-```bash
-cd ingestion/txodds
-npm ci
-npm run verify-service
-```
-
-Or with Docker:
-
-```bash
-docker build -t fixtureline-verify:latest ingestion/txodds
-docker run -e DATABASE_URL=... -e VERIFY_SERVICE_TOKEN=secret -p 3001:3001 fixtureline-verify:latest
-```
-
-Set `VERIFY_SERVICE_URL` and optionally `VERIFY_SERVICE_TOKEN` in the bot
-service environment so the bot can call `/verify-by-id` on behalf of users.
+- Keep the prediction agent as a suggestion layer; do not auto-confirm picks.
+- Avoid exposing raw TxODDS payloads in bot messages.
+- Keep bot and ingestion processes separated.
+- Maintain wallet state gating in `bot/ui.js` and `bot/handlers/misc.js` for consistent onboarding.
