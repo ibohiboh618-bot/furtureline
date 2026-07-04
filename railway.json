@@ -5,5 +5,9 @@
   },
   "deploy": {
     "startCommand": "npm run start:railway"
+  },
+  "build": {
+    "builder": "RAILPACK",
+    "buildCommand": "npm install --legacy-peer-deps --omit=optional --no-audit"
   }
 }
