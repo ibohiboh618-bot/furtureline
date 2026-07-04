@@ -68,37 +68,68 @@ bot.catch((err) => {
   console.error('[bot] unhandled error:', err.error ?? err);
 });
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function logWebhookState(context) {
+  try {
+    const info = await bot.api.getWebhookInfo();
+    console.log(`[bot] ${context} webhook state:`, {
+      url: info.url,
+      has_custom_certificate: info.has_custom_certificate,
+      pending_update_count: info.pending_update_count,
+    });
+  } catch (err) {
+    console.warn('[bot] unable to read webhook state:', err.message || err);
+  }
+}
+
 async function startPolling() {
-  const retryCount = 8;
+  const retryCount = 12;
   const retryDelayMs = 5000;
-  const recoveryWebhookUrl = 'https://example.com/fixtureline-telegram-recovery';
+  const webhookStabilizeMs = 2000;
+  const recoveryWebhookUrl = process.env.TELEGRAM_RECOVERY_WEBHOOK_URL || 'https://example.com/fixtureline-telegram-recovery';
 
   for (let attempt = 1; attempt <= retryCount; attempt++) {
     try {
       console.log(`[bot] polling attempt ${attempt}/${retryCount}...`);
+      await logWebhookState('before start');
+      console.log('[bot] deleting webhook before polling start...');
       await bot.api.deleteWebhook({ drop_pending_updates: true });
+      await delay(webhookStabilizeMs);
+      await logWebhookState('after delete');
+      console.log('[bot] webhook deleted, starting polling...');
       await bot.start();
       return;
     } catch (e) {
       const message = (e && e.message) ? e.message : String(e);
-      const isConflict = message.includes('terminated by other getUpdates request');
+      const isConflict = /terminated by (other getUpdates request|setWebhook request)/i.test(message);
       console.warn('[bot] polling startup failed:', message);
       if (!isConflict || attempt === retryCount) {
         throw e;
       }
 
-      console.warn(`[bot] stale getUpdates session still active; attempting webhook recovery before retrying in ${retryDelayMs / 1000}s...`);
+      console.warn(`[bot] stale Telegram session still active; attempting webhook recovery before retrying in ${retryDelayMs / 1000}s...`);
       try {
+        console.log('[bot] setting temporary recovery webhook...');
         await bot.api.setWebhook(recoveryWebhookUrl, { drop_pending_updates: true });
+        console.log('[bot] temporary recovery webhook set');
       } catch (setError) {
         console.warn('[bot] recovery webhook set failed:', setError.message || setError);
       }
-      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+      await delay(1000);
+      await logWebhookState('after temporary set');
       try {
+        console.log('[bot] deleting recovery webhook...');
         await bot.api.deleteWebhook({ drop_pending_updates: true });
+        console.log('[bot] recovery webhook deleted');
       } catch (delError) {
         console.warn('[bot] recovery webhook delete failed:', delError.message || delError);
       }
+      await delay(webhookStabilizeMs);
+      await logWebhookState('after temporary delete');
+      await delay(retryDelayMs);
     }
   }
 }
