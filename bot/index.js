@@ -9,12 +9,12 @@ const { Bot } = require('grammy');
 const express = require('express');
 const { webhookCallback } = require('grammy');
 
-const { registerPredictHandlers } = require('./handlers/predict');
+const { registerPredictHandlers, getOrCreateUser } = require('./handlers/predict');
 const { registerGroupHandlers } = require('./handlers/groups');
-const { registerMiscHandlers } = require('./handlers/misc');
+const { registerMiscHandlers, getWalletForUser } = require('./handlers/misc');
 const broadcastQueue = require('./broadcast-queue');
 const settlement = require('./settlement');
-const { buildMainMenu, buildStartCarouselContent } = require('./ui');
+const { buildOnboardingMenu, buildStartCarouselContent, buildMainMenu } = require('./ui');
 
 function assertEnv(name) {
   const value = process.env[name];
@@ -44,8 +44,18 @@ bot.command('start', async (ctx) => {
     ],
     footer: 'After the wallet is created, the prediction flow stays the same: ask for a pick, confirm it, and let settlement and proof tracking handle the rest.',
   });
+
+  let keyboard = buildOnboardingMenu();
+  if (ctx.from) {
+    const user = await getOrCreateUser(ctx.from);
+    const wallet = await getWalletForUser(user.id);
+    if (wallet) {
+      keyboard = buildMainMenu({ botUsername });
+    }
+  }
+
   await ctx.reply(content.text, {
-    reply_markup: buildMainMenu({ botUsername }),
+    reply_markup: keyboard,
     disable_web_page_preview: true,
   });
 });

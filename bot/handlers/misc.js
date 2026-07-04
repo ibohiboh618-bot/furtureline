@@ -8,10 +8,10 @@ require('dotenv').config({ path: ['.env', 'bot/.env'] });
 const { Pool } = require('pg');
 const axios = require('axios');
 const { InlineKeyboard } = require('grammy');
-const { buildFooterMenu } = require('../ui');
+const { buildFooterMenu, buildOnboardingMenu, buildMainMenu } = require('../ui');
 const { formatInsightsText } = require('../market-insights');
 const { createWalletSetup, verifyWalletPin, decryptSecret } = require('../wallet');
-const { handlePredictCommand, handleMyPicks } = require('./predict');
+const { handlePredictCommand, handleMyPicks, getOrCreateUser } = require('./predict');
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const TXLINE_BASE_URL = process.env.TXLINE_BASE_URL || 'https://txline.txodds.com';
@@ -268,7 +268,7 @@ async function handleWalletSetup(ctx) {
     'Your private key will not be shown in the main chat flow.',
   ].join('\n');
 
-  await ctx.reply(text, { reply_markup: buildFooterMenu() });
+  await ctx.reply(text, { reply_markup: buildOnboardingMenu() });
   await ctx.reply('Reply with a 6-digit pin to create your wallet.');
   pendingWalletActions.set(ctx.from.id, { kind: 'wallet-create' });
 }
@@ -305,8 +305,10 @@ async function createWalletForUser(ctx, pin) {
     [user.id, wallet.address, wallet.pinHash, wallet.encryptedPrivateKey, wallet.iv]
   );
 
+  const botUsername = process.env.TELEGRAM_BOT_USERNAME || 'FixtureLineBot';
   await ctx.reply(
-    `Wallet created successfully.\nAddress: ${wallet.address}\nYour private key is kept hidden for now and can be exported later from /settings after you enter the same pin.`
+    `Wallet created successfully.\nAddress: ${wallet.address}\nYour private key is kept hidden for now and can be exported later from /settings after you enter the same pin.`,
+    { reply_markup: buildMainMenu({ botUsername }) }
   );
 }
 
@@ -696,7 +698,16 @@ async function fetchMerkleProof(fixtureId, jwt, apiToken) {
 }
 
 async function handleMenu(ctx) {
-  await ctx.reply('Choose an action below, or type /help for guidance.', { reply_markup: buildFooterMenu() });
+  if (!ctx.from) {
+    return ctx.reply('Choose an action below, or type /help for guidance.', { reply_markup: buildOnboardingMenu() });
+  }
+
+  const user = await getOrCreateUser(ctx.from);
+  const wallet = await getWalletForUser(user.id);
+  const botUsername = process.env.TELEGRAM_BOT_USERNAME || 'FixtureLineBot';
+  const keyboard = wallet ? buildMainMenu({ botUsername }) : buildOnboardingMenu();
+
+  return ctx.reply('Choose an action below, or type /help for guidance.', { reply_markup: keyboard });
 }
 
 module.exports = {
@@ -707,4 +718,5 @@ module.exports = {
   handleVerify,
   handleMarkets,
   handleOdds,
+  getWalletForUser,
 };

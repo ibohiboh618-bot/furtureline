@@ -359,4 +359,4 @@ function formatPickText(pick, index, fixtureName) {
   );
 }
 
-module.exports = { registerPredictHandlers, handlePredictCommand, handleMyPicks };
+module.exports = { registerPredictHandlers, handlePredictCommand, handleMyPicks, getOrCreateUser };

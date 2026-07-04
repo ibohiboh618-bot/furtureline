@@ -25,22 +25,31 @@ function buildMainMenu({ botUsername = 'FixtureLineBot' } = {}) {
   return keyboard;
 }
 
-function buildFooterMenu() {
-  return new InlineKeyboard()
+function buildOnboardingMenu() {
+  return new InlineKeyboard().text('Create wallet', 'menu:wallet');
+}
+
+function buildFooterMenu(hasWallet = true) {
+  const keyboard = new InlineKeyboard()
     .text('Predict', 'menu:predict')
     .text('Markets', 'menu:markets')
-    .row()
-    .text('My Picks', 'menu:mypicks')
-    .text('Verify', 'menu:verify')
-    .row()
-    .text('Wallet', 'menu:wallet')
-    .text('Settings', 'menu:settings')
+    .row();
+
+  if (hasWallet) {
+    keyboard.text('My Picks', 'menu:mypicks');
+  } else {
+    keyboard.text('Wallet', 'menu:wallet');
+  }
+
+  keyboard.text('Verify', 'menu:verify')
     .row()
     .text('Leaderboard', 'menu:leaderboard')
     .text('Live odds', 'menu:odds')
     .row()
     .text('About', 'menu:about')
     .text('Diagnostics', 'menu:diagnose');
+
+  return keyboard;
 }
 
 function buildStartCarouselContent({ title = 'Welcome to FixtureLine.', quickStart = null, commands = [], footer = 'Add me to a group or channel to get live goal alerts.' } = {}) {
