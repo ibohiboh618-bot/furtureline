@@ -392,9 +392,11 @@ async function handleVerifyStatus(ctx) {
     parts.push('Verify service is configured.');
     const health = await checkVerifyServiceHealth(verifyServiceUrl);
     parts.push(`• Service health: ${health.ok ? 'ok' : `unreachable (${health.error})`}`);
-    parts.push(`• VERIFY_SERVICE_TOKEN: ${process.env.VERIFY_SERVICE_TOKEN ? 'present' : 'missing'}`);
+    parts.push(`• VERIFY_SERVICE_TOKEN: ${process.env.VERIFY_SERVICE_TOKEN ? 'present' : 'missing (set this if the verify service requires bearer auth)'}`);
+    parts.push('If this service is unreachable, verify that VERIFY_SERVICE_URL points to the correct deployed verify service endpoint.');
   } else {
-    parts.push('Verify service is not configured. Set VERIFY_SERVICE_URL and optionally VERIFY_SERVICE_TOKEN.');
+    parts.push('Verify service is not configured. Set VERIFY_SERVICE_URL in the bot environment to the verify service URL.');
+    parts.push('If your verify service requires auth, also set VERIFY_SERVICE_TOKEN.');
   }
 
   try {
@@ -424,9 +426,10 @@ async function handleDiagnose(ctx) {
   if (process.env.VERIFY_SERVICE_URL) {
     const health = await checkVerifyServiceHealth(process.env.VERIFY_SERVICE_URL);
     parts.push(`• Verify service: configured (${health.ok ? 'reachable' : `unreachable: ${health.error}`})`);
-    parts.push(`• VERIFY_SERVICE_TOKEN: ${process.env.VERIFY_SERVICE_TOKEN ? 'present' : 'missing'}`);
+    parts.push(`• VERIFY_SERVICE_TOKEN: ${process.env.VERIFY_SERVICE_TOKEN ? 'present' : 'missing (set this if your verify service requires bearer auth)'}`);
+    parts.push('  - If the service is unreachable, confirm VERIFY_SERVICE_URL points to the deployed verify service, not localhost.');
   } else {
-    parts.push('• Verify service: not configured');
+    parts.push('• Verify service: not configured (set VERIFY_SERVICE_URL on the bot service)');
   }
 
   try {

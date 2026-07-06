@@ -51,55 +51,62 @@ function registerPredictHandlers(bot) {
     await ctx.answerCallbackQuery();
     // Provide progress feedback: send a placeholder message and edit it later
     const progress = await ctx.reply('Verifying... this may take a moment.');
-    // Call the verify service (if configured) and show result; otherwise instruct
-    // the user how to run verification.
     const verifyServiceUrl = process.env.VERIFY_SERVICE_URL;
-    if (verifyServiceUrl) {
-      try {
-        const axios = require('axios');
-        const url = verifyServiceUrl.replace(/\/$/, '') + '/verify-by-id';
-        const headers = {};
-        if (process.env.VERIFY_SERVICE_TOKEN) headers['Authorization'] = `Bearer ${process.env.VERIFY_SERVICE_TOKEN}`;
-        const resp = await axios.post(url, { fixtureId }, { timeout: 20000, headers });
-        const txSig = resp.data?.txSig || resp.data?.tx_sig || resp.data?.sig;
-        if (txSig) {
-          const rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
-          const explorerUrl = rpcUrl.includes('devnet')
-            ? `https://explorer.solana.com/tx/${txSig}?cluster=devnet`
-            : `https://explorer.solana.com/tx/${txSig}`;
-          // Edit the in-progress message with the result
-          return ctx.api.editMessageText(ctx.chat.id, progress.message_id,
+    const verifyServiceToken = process.env.VERIFY_SERVICE_TOKEN;
+
+    if (!verifyServiceUrl) {
+      const fallback = 'Verification is not configured for this bot. Set VERIFY_SERVICE_URL in the bot environment to the verify service endpoint and optionally VERIFY_SERVICE_TOKEN if the service requires bearer auth.';
+      return ctx.api.editMessageText(ctx.chat.id, progress.message_id, fallback).catch(() => {
+        return ctx.reply(fallback);
+      });
+    }
+
+    try {
+      const axios = require('axios');
+      const url = verifyServiceUrl.replace(/\/$/, '') + '/verify-by-id';
+      const headers = {};
+      if (verifyServiceToken) headers['Authorization'] = `Bearer ${verifyServiceToken}`;
+      const resp = await axios.post(url, { fixtureId }, { timeout: 20000, headers });
+      const txSig = resp.data?.txSig || resp.data?.tx_sig || resp.data?.sig;
+
+      if (txSig) {
+        const rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
+        const explorerUrl = rpcUrl.includes('devnet')
+          ? `https://explorer.solana.com/tx/${txSig}?cluster=devnet`
+          : `https://explorer.solana.com/tx/${txSig}`;
+        return ctx.api.editMessageText(ctx.chat.id, progress.message_id,
+          `On-chain validation submitted.\n` +
+          `Validation transaction: <code>${txSig}</code>\n` +
+          `View on explorer: ${explorerUrl}`,
+          { parse_mode: 'HTML' }
+        ).catch(async () => {
+          await ctx.reply(
             `On-chain validation submitted.\n` +
             `Validation transaction: <code>${txSig}</code>\n` +
             `View on explorer: ${explorerUrl}`,
             { parse_mode: 'HTML' }
-          ).catch(async () => {
-            await ctx.reply(
-              `On-chain validation submitted.\n` +
-              `Validation transaction: <code>${txSig}</code>\n` +
-              `View on explorer: ${explorerUrl}`,
-              { parse_mode: 'HTML' }
-            );
-          });
-        }
-        // If the service queued the job, show queued notice with a link to job-status
-        if (resp.status === 202 && resp.data?.jobId) {
-          const jobId = resp.data.jobId;
-          const jobUrl = verifyServiceUrl.replace(/\/$/, '') + `/job-status?id=${jobId}`;
-          const { InlineKeyboard } = require('grammy');
-          const kb = new InlineKeyboard().url('Check job status', jobUrl);
-          return ctx.api.editMessageText(ctx.chat.id, progress.message_id, `Verification queued (job ${jobId}). Check status: ${jobUrl}`, { reply_markup: kb }).catch(async () => {
-            await ctx.reply(`Verification queued (job ${jobId}). Check status: ${jobUrl}`);
-          });
-        }
-      } catch (e) {
-        console.error('[predict.verify_pick] verify service error:', e?.message || e);
+          );
+        });
       }
-    }
 
-    await ctx.api.editMessageText(ctx.chat.id, progress.message_id, 'Verification service unavailable. You can run verification locally or ask an admin to deploy the verify-worker.').catch(() => {
-      ctx.reply('Verification service unavailable. You can run verification locally or ask an admin to deploy the verify-worker.');
-    });
+      if (resp.status === 202 && resp.data?.jobId) {
+        const jobId = resp.data.jobId;
+        const jobUrl = verifyServiceUrl.replace(/\/$/, '') + `/job-status?id=${jobId}`;
+        const { InlineKeyboard } = require('grammy');
+        const kb = new InlineKeyboard().url('Check job status', jobUrl);
+        return ctx.api.editMessageText(ctx.chat.id, progress.message_id, `Verification queued (job ${jobId}). Check status: ${jobUrl}`, { reply_markup: kb }).catch(async () => {
+          await ctx.reply(`Verification queued (job ${jobId}). Check status: ${jobUrl}`);
+        });
+      }
+
+      const noResult = 'Verify service responded without a transaction or job. Check the service logs or /verify-status for details.';
+      return ctx.api.editMessageText(ctx.chat.id, progress.message_id, noResult).catch(() => ctx.reply(noResult));
+    } catch (e) {
+      console.error('[predict.verify_pick] verify service error:', e?.message || e);
+      const errMsg = e.response?.data?.error || e.message || String(e);
+      const fallback = `Verification service request failed: ${errMsg}.\nEnsure VERIFY_SERVICE_URL is reachable and VERIFY_SERVICE_TOKEN is correct, then try again or use /verify-status.`;
+      return ctx.api.editMessageText(ctx.chat.id, progress.message_id, fallback).catch(() => ctx.reply(fallback));
+    }
   });
 
   // Explain what Verify does (short helper) and offer to run verification
