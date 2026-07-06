@@ -9,7 +9,7 @@ function buildMainMenu() {
     .text('Verify')
     .text('Wallet')
     .text('Settings')
-    .resize();
+    .resized();
 }
 
 function buildOnboardingMenu() {
@@ -18,7 +18,7 @@ function buildOnboardingMenu() {
     .text('Help')
     .row()
     .text('About')
-    .resize();
+    .resized();
 }
 
 function buildFooterMenu(hasWallet = true) {
@@ -38,10 +38,9 @@ function buildFooterMenu(hasWallet = true) {
     .text('Live odds')
     .row()
     .text('About')
-    .text('Diagnostics')
-    .resize();
+    .text('Diagnostics');
 
-  return keyboard;
+  return keyboard.resized();
 }
 
 function buildStartCarouselContent({ title = 'Welcome to FixtureLine.', quickStart = null, commands = [], footer = 'Add me to a group or channel to get live goal alerts.' } = {}) {
