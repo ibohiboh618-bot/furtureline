@@ -28,7 +28,7 @@ assertEnv('DATABASE_URL');
 
 const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN);
 
-bot.command('start', async (ctx) => {
+async function handleStart(ctx) {
   const botUsername = process.env.TELEGRAM_BOT_USERNAME || 'FixtureLineBot';
   const startPayload = String(ctx.startPayload || '').trim().toLowerCase() || parseStartPayload(ctx.message?.text);
 
@@ -62,7 +62,7 @@ bot.command('start', async (ctx) => {
     const user = await getOrCreateUser(ctx.from);
     const wallet = await getWalletForUser(user.id);
     if (wallet) {
-      keyboard = buildMainMenu({ botUsername });
+      keyboard = buildMainMenu();
     }
   }
 
@@ -70,7 +70,10 @@ bot.command('start', async (ctx) => {
     reply_markup: keyboard,
     disable_web_page_preview: true,
   });
-});
+}
+
+bot.command('start', handleStart);
+bot.command('Start', handleStart);
 
 function parseStartPayload(text) {
   if (!text || typeof text !== 'string') return '';

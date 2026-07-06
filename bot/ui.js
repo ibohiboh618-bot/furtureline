@@ -1,53 +1,45 @@
-const { InlineKeyboard } = require('grammy');
+const { Keyboard } = require('grammy');
 
-function buildMainMenu({ botUsername = 'FixtureLineBot' } = {}) {
-  const keyboard = new InlineKeyboard()
-    .text('Predict', 'menu:predict')
-    .text('Markets', 'menu:markets')
+function buildMainMenu() {
+  return new Keyboard()
+    .text('Predict')
+    .text('Markets')
+    .text('My Picks')
     .row()
-    .text('My Picks', 'menu:mypicks')
-    .text('Verify', 'menu:verify')
-    .row()
-    .text('Wallet', 'menu:wallet')
-    .text('Settings', 'menu:settings')
-    .row()
-    .text('Leaderboard', 'menu:leaderboard')
-    .text('Live odds', 'menu:odds')
-    .row()
-    .text('How it works', 'menu:help')
-    .text('About', 'menu:about')
-    .row()
-    .text('Diagnostics', 'menu:diagnose')
-    .row()
-    .url('Add to group', `https://t.me/${botUsername}?startgroup=fixtureline`)
-    .url('Add to channel', `https://t.me/${botUsername}?startchannel=fixtureline`);
-
-  return keyboard;
+    .text('Verify')
+    .text('Wallet')
+    .text('Settings')
+    .resize();
 }
 
 function buildOnboardingMenu() {
-  return new InlineKeyboard().text('Create wallet', 'menu:wallet');
+  return new Keyboard()
+    .text('Create wallet')
+    .text('Help')
+    .row()
+    .text('About')
+    .resize();
 }
 
 function buildFooterMenu(hasWallet = true) {
-  const keyboard = new InlineKeyboard()
-    .text('Predict', 'menu:predict')
-    .text('Markets', 'menu:markets')
-    .row();
+  const keyboard = new Keyboard()
+    .text('Predict')
+    .text('Markets');
 
   if (hasWallet) {
-    keyboard.text('My Picks', 'menu:mypicks');
+    keyboard.text('My Picks');
   } else {
-    keyboard.text('Wallet', 'menu:wallet');
+    keyboard.text('Wallet');
   }
 
-  keyboard.text('Verify', 'menu:verify')
+  keyboard.row()
+    .text('Verify')
+    .text('Leaderboard')
+    .text('Live odds')
     .row()
-    .text('Leaderboard', 'menu:leaderboard')
-    .text('Live odds', 'menu:odds')
-    .row()
-    .text('About', 'menu:about')
-    .text('Diagnostics', 'menu:diagnose');
+    .text('About')
+    .text('Diagnostics')
+    .resize();
 
   return keyboard;
 }
@@ -65,7 +57,6 @@ function buildStartCarouselContent({ title = 'Welcome to FixtureLine.', quickSta
 
   return {
     text: lines.join('\n'),
-    reply_markup: buildFooterMenu(),
   };
 }
 
