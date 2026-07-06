@@ -24,6 +24,8 @@ function registerPredictHandlers(bot) {
   // Verify a specific prediction (button shown in DM under My Picks)
   bot.callbackQuery(/^verify_pick:([^:]+):(\d+)$/, async (ctx) => {
     if (!ctx.from) return;
+    const rawData = ctx.callbackQuery?.data;
+    console.log('[bot] verify_pick callback received', { data: rawData, from: ctx.from.id });
     const [, predictionIdStr, fixtureIdStr] = ctx.match;
     const predictionId = predictionIdStr;
     const fixtureId = Number(fixtureIdStr);
@@ -103,6 +105,8 @@ function registerPredictHandlers(bot) {
   // Explain what Verify does (short helper) and offer to run verification
   bot.callbackQuery(/^verify_explain:([^:]+):(\d+)$/, async (ctx) => {
     if (!ctx.from) return;
+    const rawData = ctx.callbackQuery?.data;
+    console.log('[bot] verify_explain callback received', { data: rawData, from: ctx.from.id });
     const [, predictionIdStr, fixtureIdStr] = ctx.match;
     await ctx.answerCallbackQuery();
     await ctx.reply('Verify fetches the merkle proof archived by TxODDS for this fixture and submits it to the on-chain validator. This proves the batch that contained the fixture was anchored. Tap Verify to run it now.');
@@ -110,10 +114,21 @@ function registerPredictHandlers(bot) {
     await ctx.reply('Ready?', { reply_markup: kb });
   });
 
-  bot.callbackQuery(/^confirm_pick:(\d+):([^:]+):([^:]+)$/, async (ctx) => {
+  bot.callbackQuery(/^confirm_pick:(\d+):([^:]+):(.+)$/, async (ctx) => {
     if (!ctx.from) return;
-    const [, fixtureIdStr, market, selection] = ctx.match;
+    const rawData = ctx.callbackQuery?.data;
+    console.log('[bot] confirm_pick callback received', { data: rawData, from: ctx.from.id });
+    const [, fixtureIdStr, encodedMarket, encodedSelection] = ctx.match;
     const fixtureId = Number(fixtureIdStr);
+    let market = encodedMarket;
+    let selection = encodedSelection;
+
+    try {
+      market = decodeURIComponent(encodedMarket);
+      selection = decodeURIComponent(encodedSelection);
+    } catch (decodeError) {
+      console.warn('[bot] confirm_pick decode failed', { encodedMarket, encodedSelection, error: decodeError.message });
+    }
 
     const user = await getOrCreateUser(ctx.from);
 
@@ -220,7 +235,7 @@ async function handlePredictCommand(ctx) {
 
     const keyboard = new InlineKeyboard().text(
       `Confirm this pick (${DEFAULT_STAKE} pts)`,
-      `confirm_pick:${pick.fixtureId}:${pick.market}:${pick.selection}`
+      `confirm_pick:${pick.fixtureId}:${encodeURIComponent(pick.market)}:${encodeURIComponent(pick.selection)}`
     );
 
     await ctx.reply(formatPickText(pick, index, fixtureName), {

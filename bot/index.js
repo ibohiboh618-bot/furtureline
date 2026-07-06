@@ -9,9 +9,9 @@ const { Bot } = require('grammy');
 const express = require('express');
 const { webhookCallback } = require('grammy');
 
-const { registerPredictHandlers, getOrCreateUser } = require('./handlers/predict');
+const { registerPredictHandlers, getOrCreateUser, handlePredictCommand } = require('./handlers/predict');
 const { registerGroupHandlers } = require('./handlers/groups');
-const { registerMiscHandlers, getWalletForUser } = require('./handlers/misc');
+const { registerMiscHandlers, getWalletForUser, handleWalletSetup, handleMenu } = require('./handlers/misc');
 const broadcastQueue = require('./broadcast-queue');
 const settlement = require('./settlement');
 const { buildOnboardingMenu, buildStartCarouselContent, buildMainMenu } = require('./ui');
@@ -30,6 +30,18 @@ const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN);
 
 bot.command('start', async (ctx) => {
   const botUsername = process.env.TELEGRAM_BOT_USERNAME || 'FixtureLineBot';
+  const startPayload = String(ctx.startPayload || '').trim().toLowerCase() || parseStartPayload(ctx.message?.text);
+
+  if (startPayload === 'predict') {
+    return handlePredictCommand(ctx);
+  }
+  if (startPayload === 'wallet') {
+    return handleWalletSetup(ctx);
+  }
+  if (startPayload === 'menu') {
+    return handleMenu(ctx);
+  }
+
   const content = buildStartCarouselContent({
     title: 'FixtureLine is a live football intelligence bot for fans who want match odds, picks, and proof.',
     quickStart: 'Start by creating a transaction pin with /wallet <6-digit-pin>. That pin unlocks wallet settings later, while the private key stays hidden until you enter the pin in /settings.',
@@ -59,6 +71,14 @@ bot.command('start', async (ctx) => {
     disable_web_page_preview: true,
   });
 });
+
+function parseStartPayload(text) {
+  if (!text || typeof text !== 'string') return '';
+  const parts = text.trim().split(/\s+/);
+  if (parts.length < 2) return '';
+  const payload = parts[1].trim();
+  return payload.toLowerCase();
+}
 
 registerPredictHandlers(bot);
 registerGroupHandlers(bot);

@@ -11,20 +11,73 @@ services:
     volumes:
       - db-data:/var/lib/postgresql/data
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+
+  bot:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ./:/app
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+    command: sh -c "npm install --silent && npm run bot"
+
+  ingest_odds:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ./:/app
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - redis
+    command: sh -c "npm install --silent && npm run ingest:odds"
+
+  ingest_scores:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ./:/app
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - redis
+    command: sh -c "npm install --silent && npm run ingest:scores"
+
   verify:
     build: ./ingestion/txodds
     environment:
       DATABASE_URL: postgres://fixtureline:fixtureline@postgres:5432/fixtureline
       VERIFY_SERVICE_TOKEN: changeme
+      REDIS_URL: redis://redis:6379
     ports:
       - '3001:3001'
     depends_on:
       - postgres
+      - redis
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:3001/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  verify_worker:
+    build: ./ingestion/txodds
+    environment:
+      DATABASE_URL: postgres://fixtureline:fixtureline@postgres:5432/fixtureline
+      REDIS_URL: redis://redis:6379
+      TXLINE_BASE_URL: https://txline.txodds.com
+    depends_on:
+      - postgres
+      - redis
+    command: npm run start:verify-worker
 
 volumes:
   db-data:

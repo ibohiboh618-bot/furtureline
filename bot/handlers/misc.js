@@ -75,6 +75,15 @@ function registerMiscHandlers(bot) {
     return handleOdds(ctx, ctx.match[1]);
   });
 
+  bot.callbackQuery(/^[\s\S]*$/, async (ctx) => {
+    try {
+      await ctx.answerCallbackQuery({ text: 'Sorry, I could not process that button. Please try again or send /menu.', show_alert: false });
+    } catch (err) {
+      // swallow errors from repeated answer attempts
+    }
+    console.warn('[bot] unhandled callback data:', ctx.callbackQuery?.data);
+  });
+
   bot.on('message:text', async (ctx) => {
     if (!ctx.from) return;
     const state = pendingWalletActions.get(ctx.from.id);
@@ -718,5 +727,7 @@ module.exports = {
   handleVerify,
   handleMarkets,
   handleOdds,
+  handleWalletSetup,
+  handleMenu,
   getWalletForUser,
 };
