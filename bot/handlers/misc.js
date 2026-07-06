@@ -52,9 +52,9 @@ function registerMiscHandlers(bot) {
     if (action === 'predict') return handlePredictShortcut(ctx);
     if (action === 'mypicks') return handleMyPicks(ctx);
     if (action === 'leaderboard') return handleLeaderboard(ctx);
-    if (action === 'verify') return handleVerify(ctx);
+    if (action === 'verify') return ctx.reply('Usage: /verify <fixtureId>. Copy a fixture ID from /odds output if you need one.', { reply_markup: buildFooterMenu() });
     if (action === 'markets') return handleMarkets(ctx);
-    if (action === 'odds') return handleOdds(ctx, null);
+    if (action === 'odds') return handleOdds(ctx, null, true);
     if (action === 'about') return handleAbout(ctx);
     if (action === 'diagnose') return handleDiagnose(ctx);
     if (action === 'wallet') return handleWalletSetup(ctx);
@@ -65,7 +65,7 @@ function registerMiscHandlers(bot) {
   bot.callbackQuery(/^group:(alertlevel|odds|help)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     const action = ctx.match[1];
-    if (action === 'odds') return handleOdds(ctx, null);
+    if (action === 'odds') return handleOdds(ctx, null, true);
     if (action === 'help') return handleHelp(ctx);
     return ctx.reply('Admins can set alert level with /alertlevel goals_only | goals_and_cards | all_events.', { reply_markup: buildFooterMenu() });
   });
@@ -124,8 +124,8 @@ function getMenuAction(name) {
   }
 }
 
-async function handleOdds(ctx, overrideFixtureId = null) {
-  const fixtureId = overrideFixtureId || getOddsInput(ctx);
+async function handleOdds(ctx, overrideFixtureId = null, forceList = false) {
+  const fixtureId = forceList ? null : (overrideFixtureId || getOddsInput(ctx));
 
   if (!fixtureId) {
     // list upcoming fixtures with a short id so users can call /odds <fixtureId>

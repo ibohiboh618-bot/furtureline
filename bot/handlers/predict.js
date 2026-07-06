@@ -41,7 +41,7 @@ function registerPredictHandlers(bot) {
       return;
     }
     const ownerTelegramId = rows[0].telegram_id;
-    if (ownerTelegramId !== ctx.from.id) {
+    if (String(ownerTelegramId) !== String(ctx.from.id)) {
       await ctx.answerCallbackQuery({ text: 'Only the owner can verify this prediction.', show_alert: true });
       return;
     }
@@ -110,7 +110,7 @@ function registerPredictHandlers(bot) {
     await ctx.reply('Ready?', { reply_markup: kb });
   });
 
-  bot.callbackQuery(/^confirm_pick:(\d+):([A-Z0-9_]+):([A-Z]+)$/, async (ctx) => {
+  bot.callbackQuery(/^confirm_pick:(\d+):([^:]+):([^:]+)$/, async (ctx) => {
     if (!ctx.from) return;
     const [, fixtureIdStr, market, selection] = ctx.match;
     const fixtureId = Number(fixtureIdStr);
@@ -159,7 +159,7 @@ function registerPredictHandlers(bot) {
     });
 
     await ctx.answerCallbackQuery({ text: 'Pick locked in ✅' });
-    await ctx.editMessageReplyMarkup({ reply_markup: undefined });
+    await ctx.editMessageReplyMarkup();
     await ctx.reply(
       `✅ Pick locked in for ${fixture.home_team} vs ${fixture.away_team}.\n` +
       `${selection} is now in your active picks with ${DEFAULT_STAKE} pts staked.\n` +
